@@ -27,7 +27,7 @@ struct RawInstruction(u16);
 
 impl RawInstruction {
     fn nibble(self, i: u2) -> u4 {
-        (self.0 >> (u8::from(i) * 4) & 0x00F0).try_into().unwrap()
+        (self.0 >> (u8::from(i) * 4) & 0x000F).try_into().unwrap()
     }
 
     fn discriminant1(self) -> u4 {
@@ -157,5 +157,21 @@ impl Instruction {
             }
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use ux::{u2, u4};
+
+    use super::RawInstruction;
+
+    #[test]
+    fn test_nibbles() {
+        let raw_instruction = RawInstruction(0x1234);
+        assert_eq!(raw_instruction.nibble(u2::new(0)), u4::new(0x4));
+        assert_eq!(raw_instruction.nibble(u2::new(1)), u4::new(0x3));
+        assert_eq!(raw_instruction.nibble(u2::new(2)), u4::new(0x2));
+        assert_eq!(raw_instruction.nibble(u2::new(3)), u4::new(0x1));
     }
 }

@@ -1,14 +1,22 @@
 use std::cmp::Ordering;
 
+use egui_macroquad::macroquad::texture::Image;
+
 pub trait Screen {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
     fn draw_byte(&mut self, x: u8, y: u8, byte: u8) -> bool;
+    fn to_image(&self) -> Image;
 }
 
-#[derive(Default)]
 pub struct CosmacVipScreen(Box<[u64; 32]>);
+
+impl Default for CosmacVipScreen {
+    fn default() -> Self {
+        Self(Box::new([0xFF00FF00FF00FF00; 32]))
+    }
+}
 
 impl CosmacVipScreen {
     const WIDTH: u8 = 64;
@@ -41,6 +49,27 @@ impl Screen for CosmacVipScreen {
         let erased = self.0[y as usize] & mask != 0;
         self.0[y as usize] ^= mask;
         erased
+    }
+
+    fn to_image(&self) -> Image {
+        eprintln!("{:?}", self.0);
+        let mut bytes = vec![255; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
+        for (i, line) in self.0.iter().enumerate() {
+            let mut shift = 0;
+            let mut line = *line;
+            while shift < Self::WIDTH as u32 {
+                let leading_ones = line.leading_ones();
+                shift += leading_ones + 1;
+                line <<= leading_ones + 1;
+                let pixel_start = (i * Self::WIDTH as usize + shift as usize - 1) * 4;
+                bytes[pixel_start..pixel_start + 3].copy_from_slice(&[0, 0, 0]);
+            }
+        }
+        Image {
+            bytes,
+            width: Self::WIDTH as u16,
+            height: Self::HEIGHT as u16,
+        }
     }
 }
 

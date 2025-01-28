@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Error, Debug)]
-enum Error {
+pub enum Error {
     #[error("invalid instruction '{0:#06X}'")]
     InvalidInstruction(u16),
     #[error("the program counter tried to add past available memory (address {0:#06X})")]
@@ -31,7 +31,6 @@ enum Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Default)]
 struct Cpu {
     v: [u8; 16],
     i: u16,
@@ -40,6 +39,20 @@ struct Cpu {
     pc: u12,
     sp: u4,
     stack: [u12; 16],
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self {
+            v: [0; 16],
+            i: 0,
+            dt: 0,
+            st: 0,
+            pc: u12::new(0x200u16),
+            sp: u4::MIN,
+            stack: [u12::MIN; 16],
+        }
+    }
 }
 
 impl Cpu {
@@ -127,14 +140,12 @@ pub enum KeyEvent {
 }
 
 impl Keypad {
-    fn press(&mut self, key: u4) {
-        self.keys |= 1 << u8::from(key);
-        self.event = Some((key, KeyEvent::Press));
-    }
-
-    fn release(&mut self, key: u4) {
-        self.keys &= !(1 << u8::from(key));
-        self.event = Some((key, KeyEvent::Release));
+    fn event(&mut self, key: u4, event: KeyEvent) {
+        match event {
+            KeyEvent::Press => self.keys |= 1 << u8::from(key),
+            KeyEvent::Release => self.keys &= !(1 << u8::from(key)),
+        }
+        self.event = Some((key, event));
     }
 
     fn test_event(&mut self, event: KeyEvent) -> Option<u4> {
@@ -157,7 +168,7 @@ impl Keypad {
     }
 }
 
-struct Chip8<Model: model::Model> {
+pub struct Chip8<Model: model::Model> {
     model: Model,
     keypad: Keypad,
     cpu: Cpu,
@@ -167,10 +178,11 @@ struct Chip8<Model: model::Model> {
 }
 
 impl<Model: model::Model> Chip8<Model> {
-    fn new(model: Model) -> Self {
+    pub fn new(model: Model, rom: &[u8]) -> Self {
         let mut memory = Box::new([0; 0x1000]);
         let font_slice: &[u8] = screen::FONT.as_flattened();
         memory[..font_slice.len()].copy_from_slice(font_slice);
+        memory[0x200..0x200 + rom.len()].copy_from_slice(rom);
         let screen = model.init_screen();
         let rng = model.init_rng();
         Self {
@@ -181,6 +193,14 @@ impl<Model: model::Model> Chip8<Model> {
             screen,
             rng,
         }
+    }
+
+    pub fn event(&mut self, key: u4, event: KeyEvent) {
+        self.keypad.event(key, event)
+    }
+
+    pub fn render_frame(&self) -> egui_macroquad::macroquad::texture::Image {
+        self.screen.to_image()
     }
 
     fn set_pc(&mut self, pc: u12) {
@@ -199,7 +219,16 @@ impl<Model: model::Model> Chip8<Model> {
         )
     }
 
-    fn execute(&mut self) -> Result<()> {
+    pub fn frame(&mut self) {
+        if self.cpu.dt > 0 {
+            self.cpu.dt -= 1;
+        }
+        if self.cpu.st > 0 {
+            self.cpu.st -= 1;
+        }
+    }
+
+    pub fn cycle(&mut self) -> Result<()> {
         use Instruction as I;
 
         let raw_instruction = u16::from_be_bytes([
@@ -208,7 +237,9 @@ impl<Model: model::Model> Chip8<Model> {
         ]);
         let instruction = Instruction::from_u16(raw_instruction)
             .ok_or(Error::InvalidInstruction(raw_instruction))?;
+        self.cpu.inc_pc()?;
 
+        println!("Instruction: {raw_instruction:#06X}, {instruction:?}");
         match instruction {
             I::Sys { .. } => {}
             I::Cls => self.screen.clear(),
@@ -306,8 +337,8 @@ impl<Model: model::Model> Chip8<Model> {
                 let slice = &mut data[..u8::from(n) as usize];
                 slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + u16::from(n))?);
                 let mut erased = false;
-                for line in slice {
-                    erased |= self.screen.draw_byte(x_val, y_val, *line);
+                for (i, line) in slice.iter().enumerate() {
+                    erased |= self.screen.draw_byte(x_val, y_val + i as u8, *line);
                 }
                 self.cpu.v[0xF] = erased as u8;
             }

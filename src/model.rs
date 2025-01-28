@@ -11,7 +11,8 @@ pub trait Model {
     fn key_wait_trigger(&self) -> KeyEvent;
 }
 
-struct CosmacVip;
+#[derive(Debug, Clone, Copy)]
+pub struct CosmacVip;
 
 impl Model for CosmacVip {
     type Screen = screen::CosmacVipScreen;

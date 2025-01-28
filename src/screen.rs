@@ -14,13 +14,14 @@ pub trait Screen {
     fn to_image(&self) -> RgbaImage;
 }
 
+#[derive(Default)]
 pub struct CosmacVipScreen(Box<[u64; 32]>);
 
-impl Default for CosmacVipScreen {
-    fn default() -> Self {
-        Self(Box::new([0xFF00FF00FF00FF00; 32]))
-    }
-}
+// impl Default for CosmacVipScreen {
+//     fn default() -> Self {
+//         Self(Box::new([0xFF00FF00FF00FF00; 32]))
+//     }
+// }
 
 impl CosmacVipScreen {
     pub const WIDTH: u8 = 64;

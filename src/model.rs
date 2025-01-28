@@ -7,13 +7,30 @@ pub trait Model {
     type Rng: rand::Rng;
     fn init_screen(&self) -> Self::Screen;
     fn init_rng(&self) -> Self::Rng;
-    fn bitshift_use_y(&self) -> bool;
-    fn key_wait_trigger(&self) -> KeyEvent;
-    fn inc_i_on_slice(&self) -> bool;
+    fn quirks(&self) -> &Quirks;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Quirks {
+    pub bitshift_use_y: bool,
+    pub key_wait_trigger: KeyEvent,
+    pub inc_i_on_slice: bool,
+    pub bitwise_reset_flags: bool,
+    pub draw_wait_for_vblank: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct CosmacVip;
+
+impl CosmacVip {
+    const QUIRKS: Quirks = Quirks {
+        bitshift_use_y: true,
+        key_wait_trigger: KeyEvent::Release,
+        inc_i_on_slice: true,
+        bitwise_reset_flags: true,
+        draw_wait_for_vblank: true,
+    };
+}
 
 impl Model for CosmacVip {
     type Screen = screen::CosmacVipScreen;
@@ -27,15 +44,7 @@ impl Model for CosmacVip {
         Self::Rng::from_os_rng()
     }
 
-    fn bitshift_use_y(&self) -> bool {
-        true
-    }
-
-    fn key_wait_trigger(&self) -> KeyEvent {
-        KeyEvent::Release
-    }
-
-    fn inc_i_on_slice(&self) -> bool {
-        true
+    fn quirks(&self) -> &Quirks {
+        &Self::QUIRKS
     }
 }

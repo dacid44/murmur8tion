@@ -108,6 +108,10 @@ impl Cpu {
         self.try_set_pc(u16::from(self.pc) + 2)
     }
 
+    fn dec_pc(&mut self) {
+        self.pc = self.pc - u12::new(2);
+    }
+
     fn skip_if(&mut self, condition: bool) -> Result<()> {
         if condition {
             self.inc_pc()?;
@@ -115,8 +119,11 @@ impl Cpu {
         Ok(())
     }
 
-    fn arithmetic_op(&mut self, x: u4, y: u4, f: impl FnOnce(u8, u8) -> u8) {
+    fn arithmetic_op(&mut self, x: u4, y: u4, f: impl FnOnce(u8, u8) -> u8, reset_vf: bool) {
         self.set_v(x, f(self.get_v(x), self.get_v(y)));
+        if reset_vf {
+            self.v[0xF] = 0;
+        }
     }
 
     fn arithmetic_op_vf(&mut self, x: u4, y: u4, f: impl FnOnce(u8, u8) -> (u8, bool)) {
@@ -141,11 +148,20 @@ pub enum KeyEvent {
 
 impl Keypad {
     fn event(&mut self, key: u4, event: KeyEvent) {
-        match event {
-            KeyEvent::Press => self.keys |= 1 << u8::from(key),
-            KeyEvent::Release => self.keys &= !(1 << u8::from(key)),
+        let was_pressed = self.keys & 1 << u8::from(key) != 0;
+        let record_event = match event {
+            KeyEvent::Press => {
+                self.keys |= 1 << u8::from(key);
+                !was_pressed
+            }
+            KeyEvent::Release => {
+                self.keys &= !(1 << u8::from(key));
+                was_pressed
+            }
+        };
+        if record_event {
+            self.event = Some((key, event));
         }
-        self.event = Some((key, event));
     }
 
     fn test_event(&mut self, event: KeyEvent) -> Option<u4> {
@@ -175,6 +191,7 @@ pub struct Chip8<Model: model::Model> {
     memory: Box<[u8; 0x1000]>,
     screen: Model::Screen,
     rng: Model::Rng,
+    vblank: bool,
 }
 
 impl<Model: model::Model> Chip8<Model> {
@@ -192,6 +209,7 @@ impl<Model: model::Model> Chip8<Model> {
             memory,
             screen,
             rng,
+            vblank: false,
         }
     }
 
@@ -199,8 +217,19 @@ impl<Model: model::Model> Chip8<Model> {
         self.keypad.event(key, event)
     }
 
-    pub fn render_frame(&self) -> image::RgbaImage {
+    pub fn render_frame(&mut self) -> image::RgbaImage {
+        if self.cpu.dt > 0 {
+            self.cpu.dt -= 1;
+        }
+        if self.cpu.st > 0 {
+            self.cpu.st -= 1;
+        }
+        self.vblank = true;
         self.screen.to_image()
+    }
+
+    pub fn sound_active(&self) -> bool {
+        self.cpu.st > 0
     }
 
     fn set_pc(&mut self, pc: u12) {
@@ -217,15 +246,6 @@ impl<Model: model::Model> Chip8<Model> {
             &mut self.memory[u16::from(range.start_inclusive()?) as usize
                 ..=u16::from(range.end_inclusive()?) as usize],
         )
-    }
-
-    pub fn tick_timers(&mut self) {
-        if self.cpu.dt > 0 {
-            self.cpu.dt -= 1;
-        }
-        if self.cpu.st > 0 {
-            self.cpu.st -= 1;
-        }
     }
 
     pub fn tick(&mut self) -> Result<()> {
@@ -273,10 +293,10 @@ impl<Model: model::Model> Chip8<Model> {
             I::LdFromDt { x } => self.cpu.set_v(x, self.cpu.dt),
             I::LdSt { x } => self.cpu.st = self.cpu.get_v(x),
             I::LdFromKey { x } => {
-                if let Some(key) = self.keypad.test_event(self.model.key_wait_trigger()) {
+                if let Some(key) = self.keypad.test_event(self.model.quirks().key_wait_trigger) {
                     self.cpu.set_v(x, u8::from(key));
                 } else {
-                    self.cpu.pc = self.cpu.pc - u12::new(2);
+                    self.cpu.dec_pc();
                 }
             }
             I::LdF { x } => self.cpu.i = (self.cpu.get_v(x) * screen::FONT[0].len() as u8) as u16,
@@ -291,7 +311,7 @@ impl<Model: model::Model> Chip8<Model> {
                 slice.copy_from_slice(&self.cpu.v[..slice.len()]);
                 self.mem_slice_mut(self.cpu.i..self.cpu.i + slice.len() as u16)?
                     .copy_from_slice(slice);
-                if self.model.inc_i_on_slice() {
+                if self.model.quirks().inc_i_on_slice {
                     self.cpu.i += slice.len() as u16;
                 }
             }
@@ -300,7 +320,7 @@ impl<Model: model::Model> Chip8<Model> {
                 let slice = &mut data[..=u8::from(x) as usize];
                 slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + slice.len() as u16)?);
                 self.cpu.v[..slice.len()].copy_from_slice(slice);
-                if self.model.inc_i_on_slice() {
+                if self.model.quirks().inc_i_on_slice {
                     self.cpu.i += slice.len() as u16;
                 }
             }
@@ -309,12 +329,31 @@ impl<Model: model::Model> Chip8<Model> {
             }
             I::Add(Args::XY { x, y }) => self.cpu.arithmetic_op_vf(x, y, u8::overflowing_add),
             I::AddI { x } => self.cpu.i = self.cpu.i.wrapping_add(self.cpu.get_v(x) as u16),
-            I::Or { x, y } => self.cpu.arithmetic_op(x, y, std::ops::BitOr::bitor),
-            I::And { x, y } => self.cpu.arithmetic_op(x, y, std::ops::BitAnd::bitand),
-            I::Xor { x, y } => self.cpu.arithmetic_op(x, y, std::ops::BitXor::bitxor),
+            I::Or { x, y } => self.cpu.arithmetic_op(
+                x,
+                y,
+                std::ops::BitOr::bitor,
+                self.model.quirks().bitwise_reset_flags,
+            ),
+            I::And { x, y } => self.cpu.arithmetic_op(
+                x,
+                y,
+                std::ops::BitAnd::bitand,
+                self.model.quirks().bitwise_reset_flags,
+            ),
+            I::Xor { x, y } => self.cpu.arithmetic_op(
+                x,
+                y,
+                std::ops::BitXor::bitxor,
+                self.model.quirks().bitwise_reset_flags,
+            ),
             I::Shl { x, y } => self.cpu.arithmetic_op_vf(
                 x,
-                if self.model.bitshift_use_y() { y } else { x },
+                if self.model.quirks().bitshift_use_y {
+                    y
+                } else {
+                    x
+                },
                 |_, b| {
                     let overflow_bit = b & 0b10000000 != 0;
                     (b << 1, overflow_bit)
@@ -322,7 +361,11 @@ impl<Model: model::Model> Chip8<Model> {
             ),
             I::Shr { x, y } => self.cpu.arithmetic_op_vf(
                 x,
-                if self.model.bitshift_use_y() { y } else { x },
+                if self.model.quirks().bitshift_use_y {
+                    y
+                } else {
+                    x
+                },
                 |_, b| {
                     let overflow_bit = b & 0b1 != 0;
                     (b >> 1, overflow_bit)
@@ -338,18 +381,27 @@ impl<Model: model::Model> Chip8<Model> {
             }),
             I::Rnd { x, kk } => self.cpu.set_v(x, self.rng.random::<u8>() & kk),
             I::Drw { x, y, n } => {
-                let x_val = self.cpu.get_v(x);
-                let y_val = self.cpu.get_v(y);
-                let mut data = [0; 16];
-                let slice = &mut data[..u8::from(n) as usize];
-                slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + u16::from(n))?);
-                let mut erased = false;
-                for (i, line) in slice.iter().enumerate() {
-                    erased |= self.screen.draw_byte(x_val, y_val + i as u8, *line);
+                if self.model.quirks().draw_wait_for_vblank && !self.vblank {
+                    self.cpu.dec_pc();
+                } else {
+                    let x_val = self.cpu.get_v(x);
+                    let y_val = self.cpu.get_v(y);
+                    let mut data = [0; 16];
+                    let slice = &mut data[..u8::from(n) as usize];
+                    slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + u16::from(n))?);
+                    let mut erased = false;
+                    for (i, line) in slice.iter().enumerate() {
+                        erased |= self.screen.draw_byte(x_val, y_val + i as u8, *line);
+                    }
+                    self.cpu.v[0xF] = erased as u8;
                 }
-                self.cpu.v[0xF] = erased as u8;
             }
         }
+
+        if self.vblank {
+            self.vblank = false;
+        }
+
         Ok(())
     }
 }

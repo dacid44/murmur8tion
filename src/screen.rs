@@ -10,7 +10,7 @@ pub trait Screen {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
-    fn draw_byte(&mut self, x: u8, y: u8, byte: u8) -> bool;
+    fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool;
     fn to_image(&self) -> RgbaImage;
 }
 
@@ -41,18 +41,26 @@ impl Screen for CosmacVipScreen {
         self.0 = Default::default();
     }
 
-    fn draw_byte(&mut self, x: u8, y: u8, byte: u8) -> bool {
+    fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
         let x = x % Self::WIDTH;
         let y = y % Self::HEIGHT;
 
-        let mask = match x.cmp(&(Self::WIDTH - 8)) {
-            Ordering::Less => (byte as u64) << (Self::WIDTH - 8 - x),
-            Ordering::Equal => byte as u64,
-            Ordering::Greater => (byte as u64) >> (x - (Self::WIDTH - 8)),
-        };
+        let mut erased = false;
+        for (byte, line) in sprite
+            .iter()
+            .copied()
+            .zip(self.0[y as usize..].iter_mut())
+            .take(15)
+        {
+            let mask = match x.cmp(&(Self::WIDTH - 8)) {
+                Ordering::Less => (byte as u64) << (Self::WIDTH - 8 - x),
+                Ordering::Equal => byte as u64,
+                Ordering::Greater => (byte as u64) >> (x - (Self::WIDTH - 8)),
+            };
 
-        let erased = self.0[y as usize] & mask != 0;
-        self.0[y as usize] ^= mask;
+            erased |= *line & mask != 0;
+            *line ^= mask;
+        }
         erased
     }
 

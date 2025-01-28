@@ -389,11 +389,7 @@ impl<Model: model::Model> Chip8<Model> {
                     let mut data = [0; 16];
                     let slice = &mut data[..u8::from(n) as usize];
                     slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + u16::from(n))?);
-                    let mut erased = false;
-                    for (i, line) in slice.iter().enumerate() {
-                        erased |= self.screen.draw_byte(x_val, y_val + i as u8, *line);
-                    }
-                    self.cpu.v[0xF] = erased as u8;
+                    self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
                 }
             }
         }

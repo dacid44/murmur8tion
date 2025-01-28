@@ -53,7 +53,7 @@ fn main() {
         .insert_resource(WinitSettings::game())
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .init_resource::<UiData>()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .add_plugins(EguiPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_event::<UiEvent>()

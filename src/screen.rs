@@ -56,16 +56,19 @@ impl Screen for CosmacVipScreen {
     }
 
     fn to_image(&self) -> RgbaImage {
-        eprintln!("{:?}", self.0);
-        let mut image = RgbaImage::from_pixel(Self::WIDTH as u32, Self::HEIGHT as u32, ON_COLOR);
+        // eprintln!("{:?}", self.0);
+        let mut image = RgbaImage::from_pixel(Self::WIDTH as u32, Self::HEIGHT as u32, OFF_COLOR);
         for (i, line) in self.0.iter().enumerate() {
             let mut shift = 0;
             let mut line = *line;
-            while shift < Self::WIDTH as u32 {
-                let leading_ones = line.leading_ones();
-                shift += leading_ones + 1;
-                line <<= leading_ones + 1;
-                image.put_pixel(shift - 1, i as u32, OFF_COLOR);
+            loop {
+                let leading_zeros = line.leading_zeros();
+                shift += leading_zeros + 1;
+                line <<= leading_zeros + 1;
+                if shift >= Self::WIDTH as u32 {
+                    break;
+                }
+                image.put_pixel(shift - 1, i as u32, ON_COLOR);
             }
         }
         image

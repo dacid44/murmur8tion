@@ -239,7 +239,7 @@ impl<Model: model::Model> Chip8<Model> {
             .ok_or(Error::InvalidInstruction(raw_instruction))?;
         self.cpu.inc_pc()?;
 
-        println!("Instruction: {raw_instruction:#06X}, {instruction:?}");
+        // println!("Instruction: {raw_instruction:#06X}, {instruction:?}");
         match instruction {
             I::Sys { .. } => {}
             I::Cls => self.screen.clear(),
@@ -289,13 +289,20 @@ impl<Model: model::Model> Chip8<Model> {
                 let mut data = [0; 16];
                 let slice = &mut data[..=u8::from(x) as usize];
                 slice.copy_from_slice(&self.cpu.v[..slice.len()]);
-                self.mem_slice_mut(..slice.len())?.copy_from_slice(slice);
+                self.mem_slice_mut(self.cpu.i..self.cpu.i + slice.len() as u16)?
+                    .copy_from_slice(slice);
+                if self.model.inc_i_on_slice() {
+                    self.cpu.i += slice.len() as u16;
+                }
             }
             I::LdFromSlice { x } => {
                 let mut data = [0; 16];
                 let slice = &mut data[..=u8::from(x) as usize];
-                slice.copy_from_slice(self.mem_slice(..slice.len())?);
+                slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + slice.len() as u16)?);
                 self.cpu.v[..slice.len()].copy_from_slice(slice);
+                if self.model.inc_i_on_slice() {
+                    self.cpu.i += slice.len() as u16;
+                }
             }
             I::Add(Args::XKk { x, kk }) => {
                 self.cpu.set_v(x, self.cpu.get_v(x).wrapping_add(kk));

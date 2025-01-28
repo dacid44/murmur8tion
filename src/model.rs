@@ -9,6 +9,7 @@ pub trait Model {
     fn init_rng(&self) -> Self::Rng;
     fn bitshift_use_y(&self) -> bool;
     fn key_wait_trigger(&self) -> KeyEvent;
+    fn inc_i_on_slice(&self) -> bool;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -32,5 +33,9 @@ impl Model for CosmacVip {
 
     fn key_wait_trigger(&self) -> KeyEvent {
         KeyEvent::Release
+    }
+
+    fn inc_i_on_slice(&self) -> bool {
+        true
     }
 }

@@ -1,13 +1,17 @@
 use std::cmp::Ordering;
 
-use egui_macroquad::macroquad::texture::Image;
+use bevy::color::ColorToPacked;
+use image::{Rgba, RgbaImage};
+
+const ON_COLOR: Rgba<u8> = Rgba([0, 100, 0, 255]);
+const OFF_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
 pub trait Screen {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
     fn draw_byte(&mut self, x: u8, y: u8, byte: u8) -> bool;
-    fn to_image(&self) -> Image;
+    fn to_image(&self) -> RgbaImage;
 }
 
 pub struct CosmacVipScreen(Box<[u64; 32]>);
@@ -19,8 +23,8 @@ impl Default for CosmacVipScreen {
 }
 
 impl CosmacVipScreen {
-    const WIDTH: u8 = 64;
-    const HEIGHT: u8 = 32;
+    pub const WIDTH: u8 = 64;
+    pub const HEIGHT: u8 = 32;
 }
 
 impl Screen for CosmacVipScreen {
@@ -51,9 +55,9 @@ impl Screen for CosmacVipScreen {
         erased
     }
 
-    fn to_image(&self) -> Image {
+    fn to_image(&self) -> RgbaImage {
         eprintln!("{:?}", self.0);
-        let mut bytes = vec![255; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
+        let mut image = RgbaImage::from_pixel(Self::WIDTH as u32, Self::HEIGHT as u32, ON_COLOR);
         for (i, line) in self.0.iter().enumerate() {
             let mut shift = 0;
             let mut line = *line;
@@ -61,15 +65,10 @@ impl Screen for CosmacVipScreen {
                 let leading_ones = line.leading_ones();
                 shift += leading_ones + 1;
                 line <<= leading_ones + 1;
-                let pixel_start = (i * Self::WIDTH as usize + shift as usize - 1) * 4;
-                bytes[pixel_start..pixel_start + 3].copy_from_slice(&[0, 0, 0]);
+                image.put_pixel(shift - 1, i as u32, OFF_COLOR);
             }
         }
-        Image {
-            bytes,
-            width: Self::WIDTH as u16,
-            height: Self::HEIGHT as u16,
-        }
+        image
     }
 }
 

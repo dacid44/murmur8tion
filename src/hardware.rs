@@ -199,7 +199,7 @@ impl<Model: model::Model> Chip8<Model> {
         self.keypad.event(key, event)
     }
 
-    pub fn render_frame(&self) -> egui_macroquad::macroquad::texture::Image {
+    pub fn render_frame(&self) -> image::RgbaImage {
         self.screen.to_image()
     }
 

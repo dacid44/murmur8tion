@@ -219,7 +219,7 @@ impl<Model: model::Model> Chip8<Model> {
         )
     }
 
-    pub fn frame(&mut self) {
+    pub fn tick_timers(&mut self) {
         if self.cpu.dt > 0 {
             self.cpu.dt -= 1;
         }
@@ -228,7 +228,7 @@ impl<Model: model::Model> Chip8<Model> {
         }
     }
 
-    pub fn cycle(&mut self) -> Result<()> {
+    pub fn tick(&mut self) -> Result<()> {
         use Instruction as I;
 
         let raw_instruction = u16::from_be_bytes([

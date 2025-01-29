@@ -1,16 +1,11 @@
-use std::{
-    convert::Infallible,
-    marker::PhantomData,
-    ops::{Add, BitAnd, BitOr, Bound, RangeBounds, Sub},
-};
+use std::ops::{Add, Bound, RangeBounds, Sub};
 
 use rand::Rng;
 use thiserror::Error;
-use typenum::{op, IsLess, ToUInt, True, Unsigned, U256, U8};
 use ux::{u12, u4};
 
 use crate::{
-    instruction::{Args, Instruction},
+    instruction::{Args, Instruction, InstructionSet, SuperChipInstruction},
     model,
     screen::{self, Screen},
 };
@@ -27,6 +22,8 @@ pub enum Error {
     StackFull,
     #[error("an invalid memory address was accessed (address {0:#06X})")]
     InvalidAddress(usize),
+    #[error("an unsupported screen operation was run")]
+    UnsupportedScreenOperation(#[from] screen::UnsupportedScreenOperation),
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -192,13 +189,19 @@ pub struct Chip8<Model: model::Model> {
     screen: Model::Screen,
     rng: Model::Rng,
     vblank: bool,
+    rpl: [u8; 16],
 }
 
 impl<Model: model::Model> Chip8<Model> {
     pub fn new(model: Model, rom: &[u8]) -> Self {
         let mut memory = Box::new([0; 0x1000]);
         let font_slice: &[u8] = screen::FONT.as_flattened();
-        memory[..font_slice.len()].copy_from_slice(font_slice);
+        memory[screen::FONT_ADDRESS..screen::FONT_ADDRESS + font_slice.len()]
+            .copy_from_slice(font_slice);
+        let hires_font_slice: &[u8] = screen::SCHIP_HIRES_FONT.as_flattened();
+        memory[screen::SCHIP_HIRES_FONT_ADDRESS
+            ..screen::SCHIP_HIRES_FONT_ADDRESS + hires_font_slice.len()]
+            .copy_from_slice(hires_font_slice);
         memory[0x200..0x200 + rom.len()].copy_from_slice(rom);
         let screen = model.init_screen();
         let rng = model.init_rng();
@@ -210,6 +213,7 @@ impl<Model: model::Model> Chip8<Model> {
             screen,
             rng,
             vblank: false,
+            rpl: [0; 16],
         }
     }
 
@@ -232,10 +236,6 @@ impl<Model: model::Model> Chip8<Model> {
         self.cpu.st > 0
     }
 
-    fn set_pc(&mut self, pc: u12) {
-        self.cpu.pc = pc;
-    }
-
     fn mem_slice<R: MemBounds<I>, I>(&self, range: R) -> Result<&[u8]> {
         Ok(&self.memory[u16::from(range.start_inclusive()?) as usize
             ..=u16::from(range.end_inclusive()?) as usize])
@@ -248,14 +248,16 @@ impl<Model: model::Model> Chip8<Model> {
         )
     }
 
-    pub fn tick(&mut self) -> Result<()> {
+    // Returns a boolean specifying whether to exit
+    pub fn tick(&mut self) -> Result<bool> {
         use Instruction as I;
+        use SuperChipInstruction as Sci;
 
         let raw_instruction = u16::from_be_bytes([
             self.memory[u16::from(self.cpu.pc) as usize],
             self.memory[u16::from(self.cpu.pc) as usize + 1],
         ]);
-        let instruction = Instruction::from_u16(raw_instruction)
+        let instruction = Instruction::from_u16(raw_instruction, self.model.instruction_set())
             .ok_or(Error::InvalidInstruction(raw_instruction))?;
         self.cpu.inc_pc()?;
 
@@ -301,6 +303,7 @@ impl<Model: model::Model> Chip8<Model> {
             }
             I::LdF { x } => {
                 self.cpu.i = ((self.cpu.get_v(x) & 0xF) * screen::FONT[0].len() as u8) as u16
+                    + screen::FONT_ADDRESS as u16
             }
             I::LdB { x } => {
                 let digits = bcd(self.cpu.get_v(x));
@@ -335,19 +338,19 @@ impl<Model: model::Model> Chip8<Model> {
                 x,
                 y,
                 std::ops::BitOr::bitor,
-                self.model.quirks().bitwise_reset_flags,
+                self.model.quirks().bitwise_reset_flag,
             ),
             I::And { x, y } => self.cpu.arithmetic_op(
                 x,
                 y,
                 std::ops::BitAnd::bitand,
-                self.model.quirks().bitwise_reset_flags,
+                self.model.quirks().bitwise_reset_flag,
             ),
             I::Xor { x, y } => self.cpu.arithmetic_op(
                 x,
                 y,
                 std::ops::BitXor::bitxor,
-                self.model.quirks().bitwise_reset_flags,
+                self.model.quirks().bitwise_reset_flag,
             ),
             I::Shl { x, y } => self.cpu.arithmetic_op_vf(
                 x,
@@ -394,13 +397,60 @@ impl<Model: model::Model> Chip8<Model> {
                     self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
                 }
             }
+            I::SuperChip(instruction) => {
+                if self.model.instruction_set() >= InstructionSet::SuperChip {
+                    match instruction {
+                        Sci::Exit => return Ok(true),
+                        Sci::LoRes => {
+                            self.screen.set_hires(false)?;
+                            if self.model.quirks().clear_screen_on_mode_switch {
+                                self.screen.clear();
+                            }
+                        }
+                        Sci::HiRes => {
+                            self.screen.set_hires(true)?;
+                            if self.model.quirks().clear_screen_on_mode_switch {
+                                self.screen.clear();
+                            }
+                        }
+                        Sci::DrawLarge { x, y } => {
+                            if self.model.quirks().draw_wait_for_vblank && !self.vblank {
+                                self.cpu.dec_pc();
+                            } else {
+                                let x_val = self.cpu.get_v(x);
+                                let y_val = self.cpu.get_v(y);
+                                let mut data = [0; 32];
+                                data.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + 32)?);
+                                self.cpu.v[0xF] =
+                                    self.screen.draw_large_sprite(x_val, y_val, &data)?;
+                            }
+                        }
+                        Sci::StoreRegs { x } => self.rpl[..=u8::from(x) as usize]
+                            .copy_from_slice(&self.cpu.v[..u8::from(x) as usize]),
+                        Sci::GetRegs { x } => self.cpu.v[..=u8::from(x) as usize]
+                            .copy_from_slice(&self.rpl[..u8::from(x) as usize]),
+                        Sci::ScrollDown { n } => self.screen.scroll_down(n)?,
+                        Sci::ScrollRight => self.screen.scroll_right()?,
+                        Sci::ScrollLeft => self.screen.scroll_right()?,
+                        Sci::LdHiResF { x } => {
+                            self.cpu.i = ((self.cpu.get_v(x) & 0xF)
+                                * screen::SCHIP_HIRES_FONT[0].len() as u8)
+                                as u16
+                                + screen::SCHIP_HIRES_FONT_ADDRESS as u16
+                        }
+                    }
+                } else {
+                    self.cpu.dec_pc();
+                    return Err(Error::InvalidInstruction(raw_instruction));
+                }
+            }
         }
 
         if self.vblank {
             self.vblank = false;
         }
 
-        Ok(())
+        Ok(false)
     }
 }
 

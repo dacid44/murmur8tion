@@ -22,6 +22,12 @@ macro_rules! match_u12 {
     ($x:expr; $($match:tt)*) => { match_u12!{$x; x; $($match)* } };
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InstructionSet {
+    CosmacVip,
+    SuperChip,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RawInstruction(u16);
 
@@ -103,15 +109,42 @@ pub enum Instruction {
     Rnd { x: u4, kk: u8 },
     Drw { x: u4, y: u4, n: u4 },
     // Super Chip-48 instructions after
+    SuperChip(SuperChipInstruction),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SuperChipInstruction {
+    Exit,
+    LoRes,
+    HiRes,
+    DrawLarge { x: u4, y: u4 },
+    StoreRegs { x: u4 },
+    GetRegs { x: u4 },
+    ScrollDown { n: u4 },
+    ScrollRight,
+    ScrollLeft,
+    LdHiResF { x: u4 },
 }
 
 impl Instruction {
-    pub fn from_u16(instruction: u16) -> Option<Self> {
+    pub fn from_u16(instruction: u16, instruction_set: InstructionSet) -> Option<Self> {
+        use Instruction::SuperChip as Sc;
+        use SuperChipInstruction as Sci;
+
         let instruction = RawInstruction(instruction);
         Some(match_u4! {instruction.discriminant1();
             0x0 => match_u12! {instruction.nnn(); nnn;
                 0x0E0 => Self::Cls,
                 0x0EE => Self::Ret,
+                _ if instruction_set >= InstructionSet::SuperChip => match_u12! {nnn;
+                    0x0C0..=0x0CF => Sc(Sci::ScrollDown { n: instruction.n() }),
+                    0x0FB => Sc(Sci::ScrollRight),
+                    0x0FC => Sc(Sci::ScrollLeft),
+                    0x0FD => Sc(Sci::Exit),
+                    0x0FE => Sc(Sci::LoRes),
+                    0x0FF => Sc(Sci::HiRes),
+                    _ => Self::Sys { nnn },
+                },
                 _ => Self::Sys { nnn },
             },
             0x1 => Self::Jp { nnn: instruction.nnn() },
@@ -150,9 +183,12 @@ impl Instruction {
                 0x18 => Self::LdSt { x: instruction.x() },
                 0x1E => Self::AddI { x: instruction.x() },
                 0x29 => Self::LdF { x: instruction.x() },
+                0x30 if instruction_set >= InstructionSet::SuperChip => Sc(Sci::LdHiResF { x: instruction.x() }),
                 0x33 => Self::LdB { x: instruction.x() },
                 0x55 => Self::LdToSlice { x: instruction.x() },
                 0x65 => Self::LdFromSlice { x: instruction.x() },
+                0x75 if instruction_set >= InstructionSet::SuperChip => Sc(Sci::StoreRegs { x: instruction.x() }),
+                0x85 if instruction_set >= InstructionSet::SuperChip => Sc(Sci::GetRegs { x: instruction.x() }),
                 _ => return None,
             }
             _ => return None,

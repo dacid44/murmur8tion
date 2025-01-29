@@ -299,7 +299,9 @@ impl<Model: model::Model> Chip8<Model> {
                     self.cpu.dec_pc();
                 }
             }
-            I::LdF { x } => self.cpu.i = (self.cpu.get_v(x) * screen::FONT[0].len() as u8) as u16,
+            I::LdF { x } => {
+                self.cpu.i = ((self.cpu.get_v(x) & 0xF) * screen::FONT[0].len() as u8) as u16
+            }
             I::LdB { x } => {
                 let digits = bcd(self.cpu.get_v(x));
                 self.mem_slice_mut(self.cpu.i..=self.cpu.i + 2)?

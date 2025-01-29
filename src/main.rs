@@ -122,7 +122,17 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .init_resource::<UiData>()
         .init_resource::<KeyMapping>()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "CHIP-8 Emulator".to_owned(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+        )
         .add_plugins(EguiPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_event::<UiEvent>()
@@ -364,6 +374,7 @@ fn machine_system(
         }
         if let Err(error) = machine.machine.tick() {
             error!("Emulator error: {error}");
+            image.data = machine.machine.render_frame().into_vec();
             commands.remove_resource::<Machine>();
             return;
         }

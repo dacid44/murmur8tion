@@ -1,3 +1,6 @@
+mod cosmac_vip;
+mod schip;
+
 use std::{
     cmp::Ordering,
     fmt::Binary,
@@ -6,12 +9,17 @@ use std::{
 };
 
 use image::{Rgba, RgbaImage};
-use num_traits::{PrimInt, Zero};
+use num_traits::PrimInt;
 use thiserror::Error;
 use ux::u4;
 
+pub use cosmac_vip::CosmacVipScreen;
+pub use schip::{LegacySuperChipScreen, ModernSuperChipScreen};
+
 const ON_COLOR: Rgba<u8> = Rgba([0, 100, 0, 255]);
 const OFF_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
+
+pub type Palette = [Rgba<u8>; 16];
 
 #[derive(Error, Debug)]
 pub enum UnsupportedScreenOperation {
@@ -19,6 +27,8 @@ pub enum UnsupportedScreenOperation {
     HiresMode,
     #[error("large sprites are not supported with this screen type")]
     LargeSprite,
+    #[error("large sprites are not supported in lores mode on with this screen type")]
+    LargeSpriteInLores,
     #[error("scrolling (down) is not supported with this screen type")]
     ScrollDown,
     #[error("scrolling (right) is not supported with this screen type")]
@@ -48,7 +58,8 @@ macro_rules! screen_method {
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
                 Self::CosmacVip(machine) => Screen::$name(machine$(, $param)*),
-                Self::SuperChip(machine) => Screen::$name(machine$(, $param)*),
+                Self::LegacySuperChip(machine) => Screen::$name(machine$(, $param)*),
+                Self::ModernSuperChip(machine) => Screen::$name(machine$(, $param)*),
             }
         }
     }
@@ -56,7 +67,8 @@ macro_rules! screen_method {
 
 pub enum DynamicScreen {
     CosmacVip(CosmacVipScreen),
-    SuperChip(SuperChipScreen),
+    LegacySuperChip(LegacySuperChipScreen),
+    ModernSuperChip(ModernSuperChipScreen),
 }
 
 impl Screen for DynamicScreen {
@@ -71,192 +83,6 @@ impl Screen for DynamicScreen {
     screen_method!(scroll_right(self: &mut Self) -> Result<()>);
     screen_method!(scroll_left(self: &mut Self) -> Result<()>);
     screen_method!(to_image(self: &Self) -> RgbaImage);
-}
-
-#[derive(Default)]
-pub struct CosmacVipScreen(Box<[u64; 32]>);
-
-// impl Default for CosmacVipScreen {
-//     fn default() -> Self {
-//         Self(Box::new([0xFF00FF00FF00FF00; 32]))
-//     }
-// }
-
-impl CosmacVipScreen {
-    pub const WIDTH: u8 = 64;
-    pub const HEIGHT: u8 = 32;
-}
-
-impl Screen for CosmacVipScreen {
-    fn width(&self) -> u8 {
-        Self::WIDTH
-    }
-
-    fn height(&self) -> u8 {
-        Self::HEIGHT
-    }
-
-    fn clear(&mut self) {
-        self.0 = Default::default();
-    }
-
-    fn get_hires(&self) -> bool {
-        false
-    }
-
-    fn set_hires(&mut self, _hires: bool) -> Result<()> {
-        Err(UnsupportedScreenOperation::HiresMode)
-    }
-
-    fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
-        sprite
-            .iter()
-            .zip(self.0[(y % Self::HEIGHT) as usize..].iter_mut())
-            .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
-            .fold(false, BitOr::bitor)
-    }
-
-    fn draw_large_sprite(&mut self, _x: u8, _y: u8, _sprite: &[u8; 32]) -> Result<u8> {
-        Err(UnsupportedScreenOperation::LargeSprite)
-    }
-
-    fn scroll_down(&mut self, _amount: u4) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollDown)
-    }
-
-    fn scroll_right(&mut self) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollRight)
-    }
-
-    fn scroll_left(&mut self) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollLeft)
-    }
-
-    fn to_image(&self) -> RgbaImage {
-        // println!("{:?}", self.0);
-        screen_to_image(self.0.as_slice())
-    }
-}
-
-pub struct SuperChipScreen {
-    data: Box<[u128; 64]>,
-    hires: bool,
-}
-
-impl Default for SuperChipScreen {
-    fn default() -> Self {
-        Self {
-            data: Box::new([0; 64]),
-            hires: false,
-        }
-    }
-}
-
-impl SuperChipScreen {
-    const WIDTH: u8 = 128;
-    const HEIGHT: u8 = 64;
-}
-
-impl Screen for SuperChipScreen {
-    fn width(&self) -> u8 {
-        Self::WIDTH
-    }
-
-    fn height(&self) -> u8 {
-        Self::HEIGHT
-    }
-
-    fn clear(&mut self) {
-        self.data = Box::new([0; 64]);
-    }
-
-    fn get_hires(&self) -> bool {
-        self.hires
-    }
-
-    fn set_hires(&mut self, hires: bool) -> Result<()> {
-        self.hires = hires;
-        Ok(())
-    }
-
-    fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
-        if self.hires {
-            sprite
-                .iter()
-                .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
-                .fold(false, BitOr::bitor)
-        } else {
-            let x = (x << 1) % Self::WIDTH;
-            sprite
-                .iter()
-                .copied()
-                .map(double_bits_holger)
-                .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
-                .map(|(line, dest)| {
-                    draw_line(&mut dest[0], x, line) | draw_line(&mut dest[1], x, line)
-                })
-                .fold(false, BitOr::bitor)
-        }
-    }
-
-    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8> {
-        let collided = if self.hires {
-            sprite
-                .chunks_exact(2)
-                .map(|line| u16::from_be_bytes([line[0], line[1]]))
-                .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, line) as u8)
-                .sum()
-        } else {
-            let x = (x << 1) % Self::WIDTH;
-            sprite
-                .chunks_exact(2)
-                .map(|line| u16::from_be_bytes([line[0], line[1]]))
-                .map(double_bits_magic)
-                .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
-                .map(|(line, dest)| {
-                    draw_line(&mut dest[0], x, line) as u8 + draw_line(&mut dest[1], x, line) as u8
-                })
-                .sum()
-        };
-        Ok(collided)
-    }
-
-    fn scroll_down(&mut self, amount: u4) -> Result<()> {
-        let mut amount = u8::from(amount) as usize;
-        if !self.hires {
-            amount *= 2;
-        }
-        if amount > 0 {
-            self.data
-                .copy_within(..Self::HEIGHT as usize - amount, amount);
-            for line in self.data[..amount].iter_mut() {
-                *line = 0;
-            }
-        }
-        Ok(())
-    }
-
-    fn scroll_right(&mut self) -> Result<()> {
-        let amount = if self.hires { 4 } else { 8 };
-        for line in self.data.iter_mut() {
-            *line >>= amount;
-        }
-        Ok(())
-    }
-
-    fn scroll_left(&mut self) -> Result<()> {
-        let amount = if self.hires { 4 } else { 8 };
-        for line in self.data.iter_mut() {
-            *line <<= amount;
-        }
-        Ok(())
-    }
-
-    fn to_image(&self) -> RgbaImage {
-        screen_to_image(self.data.as_slice())
-    }
 }
 
 pub const FONT_ADDRESS: usize = 0;
@@ -388,4 +214,83 @@ fn test_double_bits_magic() {
     );
     assert_eq!(double_bits_magic(0), 0);
     assert_eq!(double_bits_magic(0xFFFF), 0xFFFFFFFF);
+}
+
+// 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abcdefghijklmnopqrstuvwxyz345678    x
+// 000000000000000000000000000000000000000000000000abcdefghijklmnop000000000000000000000000000000000000000000000000qrstuvwxyz345678    x = (x | x << 48) & 0x000000000000FFFF000000000000FFFF
+// 000000000000000000000000abcdefgh000000000000000000000000ijklmnop000000000000000000000000qrstuvwx000000000000000000000000yz345678    x = (x | x << 24) & 0x000000FF000000FF000000FF000000FF
+// 000000000000abcd000000000000efgh000000000000ijkl000000000000mnop000000000000qrst000000000000uvwx000000000000yz340000000000005678    x = (x | x << 12) & 0x000F000F000F000F000F000F000F000F
+// 000000ab000000cd000000ef000000gh000000ij000000kl000000mn000000op000000qr000000st000000uv000000wx000000yz000000340000005600000078    x = (x | x << 6)  & 0x03030303030303030303030303030303
+// 000a000b000c000d000e000f000g000h000i000j000k000l000m000n000o000p000q000r000s000t000u000v000w000x000y000z000300040005000600070008    x = (x | x << 3)  & 0x11111111111111111111111111111111
+fn expand_32bit_4x(x: u32) -> u128 {
+    let mut x = x as u128;
+    x = (x | x << 48) & 0x000000000000FFFF000000000000FFFF;
+    x = (x | x << 24) & 0x000000FF000000FF000000FF000000FF;
+    x = (x | x << 12) & 0x000F000F000F000F000F000F000F000F;
+    x = (x | x << 6) & 0x03030303030303030303030303030303;
+    x = (x | x << 3) & 0x11111111111111111111111111111111;
+    x
+}
+
+fn expand_u32(x: u32) -> u64 {
+    let mut x = x as u64;
+    x = (x | x << 16) & 0x0000FFFF0000FFFF;
+    x = (x | x << 8) & 0x00FF00FF00FF00FF;
+    x = (x | x << 4) & 0x0F0F0F0F0F0F0F0F;
+    x = (x | x << 2) & 0x3333333333333333;
+    x = (x | x << 1) & 0x5555555555555555;
+    x
+}
+
+fn expand_u64(x: u64) -> u128 {
+    let mut x = x as u128;
+    x = (x | x << 32) & 0x00000000FFFFFFFF00000000FFFFFFFF;
+    x = (x | x << 16) & 0x0000FFFF0000FFFF0000FFFF0000FFFF;
+    x = (x | x << 8) & 0x00FF00FF00FF00FF00FF00FF00FF00FF;
+    x = (x | x << 4) & 0x0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F;
+    x = (x | x << 2) & 0x33333333333333333333333333333333;
+    x = (x | x << 1) & 0x55555555555555555555555555555555;
+    x
+}
+
+fn u64_nibbles(x: u64) -> [u8; 16] {
+    let mut x = x as u128;
+    x = (x | x << 32) & 0x00000000FFFFFFFF00000000FFFFFFFF;
+    x = (x | x << 16) & 0x0000FFFF0000FFFF0000FFFF0000FFFF;
+    x = (x | x << 8) & 0x00FF00FF00FF00FF00FF00FF00FF00FF;
+    x.to_be_bytes()
+}
+
+fn combine_plane_segments(a: u32, b: u32, c: u32, d: u32) -> [u8; 32] {
+    let ac = expand_u32(a) << 1 | expand_u32(c);
+    let bd = expand_u32(b) << 1 | expand_u32(d);
+    let abcd = expand_u64(ac) << 1 | expand_u64(bd);
+    bytemuck::must_cast([
+        u64_nibbles((abcd >> 64) as u64),
+        u64_nibbles((abcd & 0xFFFFFFFFFFFFFFFF) as u64),
+    ])
+}
+
+#[cfg(target_endian = "big")]
+fn split_u128_4x(x: u128) -> [u32; 4] {
+    bytemuck::must_cast(x)
+}
+
+#[cfg(target_endian = "little")]
+fn split_u128_4x(x: u128) -> [u32; 4] {
+    let [a, b, c, d] = bytemuck::must_cast(x);
+    [d, c, b, a]
+}
+
+fn combine_planes(a: u128, b: u128, c: u128, d: u128) -> [u8; 128] {
+    let [aa, ab, ac, ad] = split_u128_4x(a);
+    let [ba, bb, bc, bd] = split_u128_4x(b);
+    let [ca, cb, cc, cd] = split_u128_4x(c);
+    let [da, db, dc, dd] = split_u128_4x(d);
+    bytemuck::must_cast([
+        combine_plane_segments(aa, ba, ca, da),
+        combine_plane_segments(ab, bb, cb, db),
+        combine_plane_segments(ac, bc, cc, dc),
+        combine_plane_segments(ad, bd, cd, dd),
+    ])
 }

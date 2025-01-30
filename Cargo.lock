@@ -1433,6 +1433,7 @@ dependencies = [
  "async-fs",
  "bevy",
  "bevy_egui",
+ "bytemuck",
  "image",
  "num-traits",
  "paste",

@@ -6,7 +6,7 @@ use ux::{u12, u4};
 
 use crate::{
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction},
-    model::{self, CosmacVip, DynamicModel, ModernSchip},
+    model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip},
     screen::{self, Screen},
 };
 
@@ -33,7 +33,8 @@ macro_rules! dynamic_machine_method {
         pub fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
                 Self::CosmacVip(machine) => Chip8::$name(machine$(, $param)*),
-                Self::ModernSchip(machine) => Chip8::$name(machine$(, $param)*),
+                Self::LegacySuperChip(machine) => Chip8::$name(machine$(, $param)*),
+                Self::ModernSuperChip(machine) => Chip8::$name(machine$(, $param)*),
             }
         }
     }
@@ -41,14 +42,16 @@ macro_rules! dynamic_machine_method {
 
 pub enum DynamicMachine {
     CosmacVip(Chip8<CosmacVip>),
-    ModernSchip(Chip8<ModernSchip>),
+    LegacySuperChip(Chip8<LegacySuperChip>),
+    ModernSuperChip(Chip8<ModernSuperChip>),
 }
 
 impl DynamicMachine {
     pub fn new(model: &DynamicModel, rom: &[u8]) -> Self {
         match model {
             DynamicModel::CosmacVip => Self::new_cosmac_vip(rom),
-            DynamicModel::ModernSchip => Self::new_modern_schip(rom),
+            DynamicModel::LegacySuperChip => Self::new_legacy_schip(rom),
+            DynamicModel::ModernSuperChip => Self::new_modern_schip(rom),
         }
     }
 
@@ -56,8 +59,12 @@ impl DynamicMachine {
         Self::CosmacVip(Chip8::new(CosmacVip, rom))
     }
 
+    pub fn new_legacy_schip(rom: &[u8]) -> Self {
+        Self::LegacySuperChip(Chip8::new(LegacySuperChip, rom))
+    }
+
     pub fn new_modern_schip(rom: &[u8]) -> Self {
-        Self::ModernSchip(Chip8::new(ModernSchip, rom))
+        Self::ModernSuperChip(Chip8::new(ModernSuperChip, rom))
     }
 
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
@@ -472,10 +479,23 @@ impl<Model: model::Model> Chip8<Model> {
                             } else {
                                 let x_val = self.cpu.get_v(x);
                                 let y_val = self.cpu.get_v(y);
-                                let mut data = [0; 32];
-                                data.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + 32)?);
-                                self.cpu.v[0xF] =
-                                    self.screen.draw_large_sprite(x_val, y_val, &data)?;
+                                if self.model.quirks().lores_draw_large_as_small
+                                    && !self.screen.get_hires()
+                                {
+                                    let mut data = [0; 16];
+                                    data.copy_from_slice(
+                                        self.mem_slice(self.cpu.i..self.cpu.i + 16)?,
+                                    );
+                                    self.cpu.v[0xF] =
+                                        self.screen.draw_sprite(x_val, y_val, &data) as u8;
+                                } else {
+                                    let mut data = [0; 32];
+                                    data.copy_from_slice(
+                                        self.mem_slice(self.cpu.i..self.cpu.i + 32)?,
+                                    );
+                                    self.cpu.v[0xF] =
+                                        self.screen.draw_large_sprite(x_val, y_val, &data)?;
+                                }
                             }
                         }
                         Sci::StoreRegs { x } => self.rpl[..=u8::from(x) as usize]

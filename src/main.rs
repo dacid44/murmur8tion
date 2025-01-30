@@ -231,8 +231,13 @@ fn emulator_ui_system(
                     );
                     ui.selectable_value(
                         &mut ui_data.machine_model,
-                        DynamicModel::ModernSchip,
-                        DynamicModel::ModernSchip.to_string(),
+                        DynamicModel::LegacySuperChip,
+                        DynamicModel::LegacySuperChip.to_string(),
+                    );
+                    ui.selectable_value(
+                        &mut ui_data.machine_model,
+                        DynamicModel::ModernSuperChip,
+                        DynamicModel::ModernSuperChip.to_string(),
                     );
                 });
 

@@ -1,5 +1,6 @@
 use std::{
     cmp::Ordering,
+    fmt::Binary,
     mem,
     ops::{BitAnd, BitOr, BitXorAssign, Shl, ShlAssign, Shr},
 };
@@ -32,6 +33,7 @@ pub trait Screen {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
+    fn get_hires(&self) -> bool;
     fn set_hires(&mut self, hires: bool) -> Result<()>;
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool;
     fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8>;
@@ -39,6 +41,36 @@ pub trait Screen {
     fn scroll_right(&mut self) -> Result<()>;
     fn scroll_left(&mut self) -> Result<()>;
     fn to_image(&self) -> RgbaImage;
+}
+
+macro_rules! screen_method {
+    ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
+            match self {
+                Self::CosmacVip(machine) => Screen::$name(machine$(, $param)*),
+                Self::SuperChip(machine) => Screen::$name(machine$(, $param)*),
+            }
+        }
+    }
+}
+
+pub enum DynamicScreen {
+    CosmacVip(CosmacVipScreen),
+    SuperChip(SuperChipScreen),
+}
+
+impl Screen for DynamicScreen {
+    screen_method!(width(self: &Self) -> u8);
+    screen_method!(height(self: &Self) -> u8);
+    screen_method!(clear(self: &mut Self));
+    screen_method!(get_hires(self: &Self) -> bool);
+    screen_method!(set_hires(self: &mut Self, hires: bool) -> Result<()>);
+    screen_method!(draw_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8]) -> bool);
+    screen_method!(draw_large_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8>);
+    screen_method!(scroll_down(self: &mut Self, amount: u4) -> Result<()>);
+    screen_method!(scroll_right(self: &mut Self) -> Result<()>);
+    screen_method!(scroll_left(self: &mut Self) -> Result<()>);
+    screen_method!(to_image(self: &Self) -> RgbaImage);
 }
 
 #[derive(Default)]
@@ -66,6 +98,10 @@ impl Screen for CosmacVipScreen {
 
     fn clear(&mut self) {
         self.0 = Default::default();
+    }
+
+    fn get_hires(&self) -> bool {
+        false
     }
 
     fn set_hires(&mut self, _hires: bool) -> Result<()> {
@@ -97,6 +133,7 @@ impl Screen for CosmacVipScreen {
     }
 
     fn to_image(&self) -> RgbaImage {
+        // println!("{:?}", self.0);
         screen_to_image(self.0.as_slice())
     }
 }
@@ -133,6 +170,10 @@ impl Screen for SuperChipScreen {
         self.data = Box::new([0; 64]);
     }
 
+    fn get_hires(&self) -> bool {
+        self.hires
+    }
+
     fn set_hires(&mut self, hires: bool) -> Result<()> {
         self.hires = hires;
         Ok(())
@@ -146,12 +187,12 @@ impl Screen for SuperChipScreen {
                 .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
                 .fold(false, BitOr::bitor)
         } else {
-            let x = x * 2 % Self::WIDTH;
+            let x = (x << 1) % Self::WIDTH;
             sprite
                 .iter()
                 .copied()
                 .map(double_bits_holger)
-                .zip(self.data[(y * 2 % Self::HEIGHT) as usize..].chunks_exact_mut(2))
+                .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
                 .map(|(line, dest)| {
                     draw_line(&mut dest[0], x, line) | draw_line(&mut dest[1], x, line)
                 })
@@ -165,15 +206,15 @@ impl Screen for SuperChipScreen {
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x, line) as u8)
+                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, line) as u8)
                 .sum()
         } else {
-            let x = x * 2 % Self::WIDTH;
+            let x = (x << 1) % Self::WIDTH;
             sprite
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .map(double_bits_magic)
-                .zip(self.data[(y * 2 % Self::HEIGHT) as usize..].chunks_exact_mut(2))
+                .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
                 .map(|(line, dest)| {
                     draw_line(&mut dest[0], x, line) as u8 + draw_line(&mut dest[1], x, line) as u8
                 })
@@ -183,7 +224,10 @@ impl Screen for SuperChipScreen {
     }
 
     fn scroll_down(&mut self, amount: u4) -> Result<()> {
-        let amount = u8::from(if self.hires { amount >> 1 } else { amount }) as usize;
+        let mut amount = u8::from(amount) as usize;
+        if !self.hires {
+            amount *= 2;
+        }
         if amount > 0 {
             self.data
                 .copy_within(..Self::HEIGHT as usize - amount, amount);
@@ -195,15 +239,17 @@ impl Screen for SuperChipScreen {
     }
 
     fn scroll_right(&mut self) -> Result<()> {
+        let amount = if self.hires { 4 } else { 8 };
         for line in self.data.iter_mut() {
-            *line >>= 4;
+            *line >>= amount;
         }
         Ok(())
     }
 
     fn scroll_left(&mut self) -> Result<()> {
+        let amount = if self.hires { 4 } else { 8 };
         for line in self.data.iter_mut() {
-            *line <<= 4;
+            *line <<= amount;
         }
         Ok(())
     }
@@ -271,20 +317,25 @@ where
     collided
 }
 
-fn screen_to_image<N: PrimInt + ShlAssign<u32>>(data: &[N]) -> RgbaImage {
+fn screen_to_image<N: PrimInt + ShlAssign<u32> + Binary>(data: &[N]) -> RgbaImage {
     let width = mem::size_of::<N>() as u32 * 8;
     let mut image = RgbaImage::from_pixel(width, data.len() as u32, OFF_COLOR);
     for (i, line) in data.iter().enumerate() {
+        // println!("\nline {i} {line:#066b}");
         let mut shift = 0;
         let mut line = *line;
         loop {
             let leading_zeros = line.leading_zeros();
-            shift += leading_zeros + 1;
-            line <<= leading_zeros + 1;
-            if shift >= width as u32 {
+            if leading_zeros >= width as u32 {
                 break;
             }
+            shift += leading_zeros + 1;
+            // print!("; {leading_zeros} {shift}");
             image.put_pixel(shift - 1, i as u32, ON_COLOR);
+            if leading_zeros + 1 >= width as u32 {
+                break;
+            }
+            line <<= leading_zeros + 1;
         }
     }
     image

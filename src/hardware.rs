@@ -6,7 +6,7 @@ use ux::{u12, u4};
 
 use crate::{
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction},
-    model,
+    model::{self, CosmacVip, DynamicModel, ModernSchip},
     screen::{self, Screen},
 };
 
@@ -27,6 +27,44 @@ pub enum Error {
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
+
+macro_rules! dynamic_machine_method {
+    ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        pub fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
+            match self {
+                Self::CosmacVip(machine) => Chip8::$name(machine$(, $param)*),
+                Self::ModernSchip(machine) => Chip8::$name(machine$(, $param)*),
+            }
+        }
+    }
+}
+
+pub enum DynamicMachine {
+    CosmacVip(Chip8<CosmacVip>),
+    ModernSchip(Chip8<ModernSchip>),
+}
+
+impl DynamicMachine {
+    pub fn new(model: &DynamicModel, rom: &[u8]) -> Self {
+        match model {
+            DynamicModel::CosmacVip => Self::new_cosmac_vip(rom),
+            DynamicModel::ModernSchip => Self::new_modern_schip(rom),
+        }
+    }
+
+    pub fn new_cosmac_vip(rom: &[u8]) -> Self {
+        Self::CosmacVip(Chip8::new(CosmacVip, rom))
+    }
+
+    pub fn new_modern_schip(rom: &[u8]) -> Self {
+        Self::ModernSchip(Chip8::new(ModernSchip, rom))
+    }
+
+    dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
+    dynamic_machine_method!(render_frame(self: &mut Self) -> image::RgbaImage);
+    dynamic_machine_method!(sound_active(self: &Self) -> bool);
+    dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
+}
 
 struct Cpu {
     v: [u8; 16],
@@ -248,6 +286,13 @@ impl<Model: model::Model> Chip8<Model> {
         )
     }
 
+    fn draw_wait_for_vblank(&self) -> bool {
+        self.model
+            .quirks()
+            .draw_wait_for_vblank
+            .wait(self.screen.get_hires())
+    }
+
     // Returns a boolean specifying whether to exit
     pub fn tick(&mut self) -> Result<bool> {
         use Instruction as I;
@@ -267,7 +312,15 @@ impl<Model: model::Model> Chip8<Model> {
             I::Cls => self.screen.clear(),
             I::Ret => self.cpu.pop_stack()?,
             I::Jp { nnn } => self.cpu.pc = nnn,
-            I::JpV0 { nnn } => self.cpu.try_set_pc(u16::from(nnn) + self.cpu.v[0] as u16)?,
+            I::JpV0 { nnn } => {
+                let reg = if self.model.quirks().jump_v0_use_vx {
+                    (u16::from(nnn) >> 8) as usize
+                } else {
+                    0
+                };
+                self.cpu
+                    .try_set_pc(u16::from(nnn) + self.cpu.v[reg] as u16)?
+            }
             I::Call { nnn } => {
                 self.cpu.push_stack()?;
                 self.cpu.pc = nnn;
@@ -386,7 +439,7 @@ impl<Model: model::Model> Chip8<Model> {
             }),
             I::Rnd { x, kk } => self.cpu.set_v(x, self.rng.random::<u8>() & kk),
             I::Drw { x, y, n } => {
-                if self.model.quirks().draw_wait_for_vblank && !self.vblank {
+                if self.draw_wait_for_vblank() && !self.vblank {
                     self.cpu.dec_pc();
                 } else {
                     let x_val = self.cpu.get_v(x);
@@ -414,7 +467,7 @@ impl<Model: model::Model> Chip8<Model> {
                             }
                         }
                         Sci::DrawLarge { x, y } => {
-                            if self.model.quirks().draw_wait_for_vblank && !self.vblank {
+                            if self.draw_wait_for_vblank() && !self.vblank {
                                 self.cpu.dec_pc();
                             } else {
                                 let x_val = self.cpu.get_v(x);
@@ -426,12 +479,12 @@ impl<Model: model::Model> Chip8<Model> {
                             }
                         }
                         Sci::StoreRegs { x } => self.rpl[..=u8::from(x) as usize]
-                            .copy_from_slice(&self.cpu.v[..u8::from(x) as usize]),
+                            .copy_from_slice(&self.cpu.v[..=u8::from(x) as usize]),
                         Sci::GetRegs { x } => self.cpu.v[..=u8::from(x) as usize]
-                            .copy_from_slice(&self.rpl[..u8::from(x) as usize]),
+                            .copy_from_slice(&self.rpl[..=u8::from(x) as usize]),
                         Sci::ScrollDown { n } => self.screen.scroll_down(n)?,
                         Sci::ScrollRight => self.screen.scroll_right()?,
-                        Sci::ScrollLeft => self.screen.scroll_right()?,
+                        Sci::ScrollLeft => self.screen.scroll_left()?,
                         Sci::LdHiResF { x } => {
                             self.cpu.i = ((self.cpu.get_v(x) & 0xF)
                                 * screen::SCHIP_HIRES_FONT[0].len() as u8)

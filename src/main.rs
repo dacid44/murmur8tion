@@ -14,7 +14,9 @@ use bevy::{
     winit::WinitSettings,
 };
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
-use hardware::{Chip8, KeyEvent};
+use hardware::{Chip8, DynamicMachine, KeyEvent};
+use image::RgbaImage;
+use model::DynamicModel;
 use ux::u4;
 
 mod hardware;
@@ -30,14 +32,14 @@ struct EmulatorFrame {
 
 #[derive(Resource)]
 struct Machine {
-    machine: Chip8<model::CosmacVip>,
+    machine: DynamicMachine,
     queued_inputs: VecDeque<(u4, KeyEvent)>,
 }
 
 impl Machine {
-    fn new(model: model::CosmacVip, rom: &[u8]) -> Self {
+    fn new(model: &DynamicModel, rom: &[u8]) -> Self {
         Self {
-            machine: Chip8::new(model, rom),
+            machine: DynamicMachine::new(model, rom),
             queued_inputs: VecDeque::new(),
         }
     }
@@ -55,6 +57,7 @@ struct UiData {
     frame_rate: f64,
     cycles_per_frame: u32,
     actual_fps: f64,
+    machine_model: DynamicModel,
     rom_name: String,
 }
 
@@ -65,6 +68,7 @@ impl Default for UiData {
             frame_rate: 60.0,
             cycles_per_frame: 100,
             actual_fps: 0.0,
+            machine_model: DynamicModel::CosmacVip,
             rom_name: "No ROM loaded".to_owned(),
         }
     }
@@ -177,7 +181,7 @@ fn setup_system(
     let handle = images.add(image);
 
     let sprite = commands.spawn(Sprite::from_image(handle.clone())).id();
-    let pitch = pitch_assets.add(Pitch::new(261.63, Duration::MAX));
+    let pitch = pitch_assets.add(Pitch::new(261.63, Duration::from_secs(3600)));
     commands.insert_resource(EmulatorFrame {
         frame_handle: handle,
         frame_sprite: sprite,
@@ -217,6 +221,21 @@ fn emulator_ui_system(
                 }
             });
 
+            egui::ComboBox::from_label("Machine type")
+                .selected_text(ui_data.machine_model.to_string())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut ui_data.machine_model,
+                        DynamicModel::CosmacVip,
+                        DynamicModel::CosmacVip.to_string(),
+                    );
+                    ui.selectable_value(
+                        &mut ui_data.machine_model,
+                        DynamicModel::ModernSchip,
+                        DynamicModel::ModernSchip.to_string(),
+                    );
+                });
+
             if ui.button("Reset Emulator").clicked() {
                 ui_events.send(UiEvent::ResetMachine);
             }
@@ -253,8 +272,9 @@ fn emulator_ui_system(
 }
 
 fn handle_ui_events(
-    mut ui_events: EventReader<UiEvent>,
     mut commands: Commands,
+    ui_data: ResMut<UiData>,
+    mut ui_events: EventReader<UiEvent>,
     mut time: ResMut<Time<Fixed>>,
     rom: Option<Res<Rom>>,
     emulator_output: Res<EmulatorFrame>,
@@ -267,7 +287,7 @@ fn handle_ui_events(
             }
             UiEvent::ResetMachine => {
                 if let Some(rom) = rom.as_ref() {
-                    commands.insert_resource(Machine::new(model::CosmacVip, &rom.0))
+                    commands.insert_resource(Machine::new(&ui_data.machine_model, &rom.0))
                 }
             }
             UiEvent::ChangeTickRate(rate) => time.set_timestep_hz(*rate),
@@ -323,10 +343,12 @@ fn rom_loaded(
     mut ui_data: ResMut<UiData>,
 ) {
     for (entity, mut task) in &mut tasks {
-        if let Some(Some(rom)) = block_on(poll_once(&mut task.0)) {
+        if let Some(maybe_rom) = block_on(poll_once(&mut task.0)) {
             commands.entity(entity).despawn();
-            ui_data.rom_name = rom.0;
-            commands.insert_resource(Rom(rom.1));
+            if let Some(rom) = maybe_rom {
+                ui_data.rom_name = rom.0;
+                commands.insert_resource(Rom(rom.1));
+            }
         }
     }
 }
@@ -366,7 +388,7 @@ fn machine_system(
     let image = images
         .get_mut(&emulator_output.frame_handle)
         .expect("Emulator frame not found");
-    image.data = machine.machine.render_frame().into_vec();
+    write_frame(image, machine.machine.render_frame());
 
     for _ in 0..(ui_data.cycles_per_frame) {
         if let Some((key, event)) = machine.queued_inputs.pop_front() {
@@ -374,7 +396,7 @@ fn machine_system(
         }
         if let Err(error) = machine.machine.tick() {
             error!("Emulator error: {error}");
-            image.data = machine.machine.render_frame().into_vec();
+            write_frame(image, machine.machine.render_frame());
             commands.remove_resource::<Machine>();
             return;
         }
@@ -391,6 +413,17 @@ fn machine_audio(
     if beep.is_paused() == (is_machine_sound_active && !ui_data.paused) {
         beep.toggle();
     }
+}
+
+fn write_frame(texture: &mut Image, frame: RgbaImage) {
+    if texture.width() != frame.width() || texture.height() != texture.height() {
+        texture.resize(Extent3d {
+            width: frame.width(),
+            height: frame.height(),
+            depth_or_array_layers: 1,
+        });
+    }
+    texture.data = frame.into_vec();
 }
 
 fn egui_to_bevy_rect(rect: egui::Rect) -> Rect {

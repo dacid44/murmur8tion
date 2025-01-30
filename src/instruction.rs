@@ -170,7 +170,11 @@ impl Instruction {
             0xA => Self::LdI { nnn: instruction.nnn() },
             0xB => Self::JpV0 { nnn: instruction.nnn() },
             0xC => Self::Rnd { x: instruction.x(), kk: instruction.kk() },
-            0xD => Self::Drw { x: instruction.x(), y: instruction.y(), n: instruction.n() },
+            0xD => if instruction_set >= InstructionSet::SuperChip && instruction.discriminant3() == u4::new(0x0) {
+                Sc(Sci::DrawLarge { x: instruction.x(), y: instruction.y() })
+            } else {
+                Self::Drw { x: instruction.x(), y: instruction.y(), n: instruction.n() }
+            },
             0xE => match instruction.discriminant2() {
                 0x9E => Self::Skp { x: instruction.x() },
                 0xA1 => Self::Sknp { x: instruction.x() },

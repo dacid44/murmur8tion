@@ -14,15 +14,18 @@ use bevy::{
     winit::WinitSettings,
 };
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
-use hardware::{Chip8, DynamicMachine, KeyEvent};
+use hardware::{DynamicMachine, KeyEvent};
 use image::RgbaImage;
 use model::DynamicModel;
+use screen::Palette;
 use ux::u4;
+use widgets::palette_editor;
 
 mod hardware;
 mod instruction;
 mod model;
 mod screen;
+mod widgets;
 
 #[derive(Resource)]
 struct EmulatorFrame {
@@ -59,6 +62,7 @@ struct UiData {
     actual_fps: f64,
     machine_model: DynamicModel,
     rom_name: String,
+    palette: Palette,
 }
 
 impl Default for UiData {
@@ -70,6 +74,7 @@ impl Default for UiData {
             actual_fps: 0.0,
             machine_model: DynamicModel::CosmacVip,
             rom_name: "No ROM loaded".to_owned(),
+            palette: Default::default(),
         }
     }
 }
@@ -266,6 +271,8 @@ fn emulator_ui_system(
             );
         });
 
+        palette_editor(ui, &mut ui_data.palette);
+
         ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover())
     });
 
@@ -393,7 +400,7 @@ fn machine_system(
     let image = images
         .get_mut(&emulator_output.frame_handle)
         .expect("Emulator frame not found");
-    write_frame(image, machine.machine.render_frame());
+    write_frame(image, machine.machine.render_frame(&ui_data.palette));
 
     for _ in 0..(ui_data.cycles_per_frame) {
         if let Some((key, event)) = machine.queued_inputs.pop_front() {
@@ -401,7 +408,7 @@ fn machine_system(
         }
         if let Err(error) = machine.machine.tick() {
             error!("Emulator error: {error}");
-            write_frame(image, machine.machine.render_frame());
+            write_frame(image, machine.machine.render_frame(&ui_data.palette));
             commands.remove_resource::<Machine>();
             return;
         }

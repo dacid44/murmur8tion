@@ -3,7 +3,9 @@ use std::ops::BitOr;
 use image::RgbaImage;
 use ux::u4;
 
-use super::{double_bits_holger, double_bits_magic, draw_line, screen_to_image, Result, Screen};
+use super::{
+    double_bits_holger, double_bits_magic, draw_line, screen_to_image, Palette, Result, Screen,
+};
 
 pub struct LegacySuperChipScreen {
     data: Box<[u128; 64]>,
@@ -114,8 +116,8 @@ impl Screen for LegacySuperChipScreen {
         Ok(())
     }
 
-    fn to_image(&self) -> RgbaImage {
-        screen_to_image(self.data.as_slice())
+    fn to_image(&self, palette: &Palette) -> RgbaImage {
+        screen_to_image(self.data.as_slice(), palette)
     }
 }
 
@@ -235,7 +237,7 @@ impl Screen for ModernSuperChipScreen {
         Ok(())
     }
 
-    fn to_image(&self) -> RgbaImage {
-        screen_to_image(self.data.as_slice())
+    fn to_image(&self, palette: &Palette) -> RgbaImage {
+        screen_to_image(self.data.as_slice(), palette)
     }
 }

@@ -19,7 +19,46 @@ pub use schip::{LegacySuperChipScreen, ModernSuperChipScreen};
 const ON_COLOR: Rgba<u8> = Rgba([0, 100, 0, 255]);
 const OFF_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
-pub type Palette = [Rgba<u8>; 16];
+// from https://github.com/gulrak/cadmium/blob/1e1f524c4d1c5ceff3b3da8818f0ed815e9160db/src/cadmium.cpp#L1893-L1898
+const CADMIUM_PALETTE: [u32; 16] = [
+    0x1a1c2cff, 0xf4f4f4ff, 0x94b0c2ff, 0x333c57ff, 0xb13e53ff, 0xa7f070ff, 0x3b5dc9ff, 0xffcd75ff,
+    0x5d275dff, 0x38b764ff, 0x29366fff, 0x566c86ff, 0xef7d57ff, 0x73eff7ff, 0x41a6f6ff, 0x257179ff,
+];
+
+pub struct Palette {
+    pub two_color: [Rgba<u8>; 2],
+    pub sixteen_color: [Rgba<u8>; 16],
+    pub use_custom_two_color: bool,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        let sixteen_color = CADMIUM_PALETTE.map(|color| Rgba::from(color.to_be_bytes()));
+        Self {
+            two_color: [sixteen_color[0], sixteen_color[1]],
+            sixteen_color,
+            use_custom_two_color: true,
+        }
+    }
+}
+
+impl Palette {
+    fn two_color_off(&self) -> Rgba<u8> {
+        if self.use_custom_two_color {
+            self.two_color[0]
+        } else {
+            self.sixteen_color[0]
+        }
+    }
+
+    fn two_color_on(&self) -> Rgba<u8> {
+        if self.use_custom_two_color {
+            self.two_color[1]
+        } else {
+            self.sixteen_color[1]
+        }
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum UnsupportedScreenOperation {
@@ -50,7 +89,7 @@ pub trait Screen {
     fn scroll_down(&mut self, amount: u4) -> Result<()>;
     fn scroll_right(&mut self) -> Result<()>;
     fn scroll_left(&mut self) -> Result<()>;
-    fn to_image(&self) -> RgbaImage;
+    fn to_image(&self, palette: &Palette) -> RgbaImage;
 }
 
 macro_rules! screen_method {
@@ -82,7 +121,7 @@ impl Screen for DynamicScreen {
     screen_method!(scroll_down(self: &mut Self, amount: u4) -> Result<()>);
     screen_method!(scroll_right(self: &mut Self) -> Result<()>);
     screen_method!(scroll_left(self: &mut Self) -> Result<()>);
-    screen_method!(to_image(self: &Self) -> RgbaImage);
+    screen_method!(to_image(self: &Self, palette: &Palette) -> RgbaImage);
 }
 
 pub const FONT_ADDRESS: usize = 0;
@@ -143,9 +182,13 @@ where
     collided
 }
 
-fn screen_to_image<N: PrimInt + ShlAssign<u32> + Binary>(data: &[N]) -> RgbaImage {
+fn screen_to_image<N: PrimInt + ShlAssign<u32> + Binary>(
+    data: &[N],
+    palette: &Palette,
+) -> RgbaImage {
     let width = mem::size_of::<N>() as u32 * 8;
-    let mut image = RgbaImage::from_pixel(width, data.len() as u32, OFF_COLOR);
+    let mut image = RgbaImage::from_pixel(width, data.len() as u32, palette.two_color_off());
+    let on_color = palette.two_color_on();
     for (i, line) in data.iter().enumerate() {
         // println!("\nline {i} {line:#066b}");
         let mut shift = 0;
@@ -157,7 +200,7 @@ fn screen_to_image<N: PrimInt + ShlAssign<u32> + Binary>(data: &[N]) -> RgbaImag
             }
             shift += leading_zeros + 1;
             // print!("; {leading_zeros} {shift}");
-            image.put_pixel(shift - 1, i as u32, ON_COLOR);
+            image.put_pixel(shift - 1, i as u32, on_color);
             if leading_zeros + 1 >= width as u32 {
                 break;
             }

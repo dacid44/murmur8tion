@@ -7,7 +7,7 @@ use ux::{u12, u4};
 use crate::{
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction},
     model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip},
-    screen::{self, Screen},
+    screen::{self, Palette, Screen},
 };
 
 #[derive(Error, Debug)]
@@ -68,7 +68,7 @@ impl DynamicMachine {
     }
 
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
-    dynamic_machine_method!(render_frame(self: &mut Self) -> image::RgbaImage);
+    dynamic_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
     dynamic_machine_method!(sound_active(self: &Self) -> bool);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
 }
@@ -266,7 +266,7 @@ impl<Model: model::Model> Chip8<Model> {
         self.keypad.event(key, event)
     }
 
-    pub fn render_frame(&mut self) -> image::RgbaImage {
+    pub fn render_frame(&mut self, palette: &Palette) -> image::RgbaImage {
         if self.cpu.dt > 0 {
             self.cpu.dt -= 1;
         }
@@ -274,7 +274,7 @@ impl<Model: model::Model> Chip8<Model> {
             self.cpu.st -= 1;
         }
         self.vblank = true;
-        self.screen.to_image()
+        self.screen.to_image(palette)
     }
 
     pub fn sound_active(&self) -> bool {

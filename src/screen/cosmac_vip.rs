@@ -3,7 +3,7 @@ use std::ops::BitOr;
 use image::RgbaImage;
 use ux::u4;
 
-use super::{draw_line, screen_to_image, Result, Screen, UnsupportedScreenOperation};
+use super::{draw_line, screen_to_image, Palette, Result, Screen, UnsupportedScreenOperation};
 
 #[derive(Default)]
 pub struct CosmacVipScreen(Box<[u64; 32]>);
@@ -58,8 +58,8 @@ impl Screen for CosmacVipScreen {
         Err(UnsupportedScreenOperation::ScrollLeft)
     }
 
-    fn to_image(&self) -> RgbaImage {
+    fn to_image(&self, palette: &Palette) -> RgbaImage {
         // println!("{:?}", self.0);
-        screen_to_image(self.0.as_slice())
+        screen_to_image(self.0.as_slice(), palette)
     }
 }

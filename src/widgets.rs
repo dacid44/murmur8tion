@@ -1,7 +1,35 @@
-use bevy_egui::egui::{self, Align, Color32, InnerResponse, Response, Ui, WidgetText};
+use bevy_egui::egui::{self, Align, Color32, Response, Ui};
 use image::Rgba;
 
-use crate::screen::Palette;
+use crate::{model::DynamicModel, screen::Palette};
+
+pub fn model_selector(ui: &mut Ui, model: &mut DynamicModel) -> egui::Response {
+    egui::ComboBox::from_label("Machine type")
+        .selected_text(model.to_string())
+        .show_ui(ui, |ui| {
+            ui.selectable_value(
+                model,
+                DynamicModel::CosmacVip,
+                DynamicModel::CosmacVip.to_string(),
+            );
+            ui.selectable_value(
+                model,
+                DynamicModel::LegacySuperChip,
+                DynamicModel::LegacySuperChip.to_string(),
+            );
+            ui.selectable_value(
+                model,
+                DynamicModel::ModernSuperChip,
+                DynamicModel::ModernSuperChip.to_string(),
+            );
+            ui.selectable_value(
+                model,
+                DynamicModel::XoChip,
+                DynamicModel::XoChip.to_string(),
+            );
+        })
+        .response
+}
 
 pub fn palette_editor(ui: &mut Ui, palette: &mut Palette) -> egui::CollapsingResponse<()> {
     egui::CollapsingHeader::new("Customize Palette").show(ui, |ui| {

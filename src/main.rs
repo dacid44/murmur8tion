@@ -16,10 +16,10 @@ use bevy::{
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use hardware::{DynamicMachine, KeyEvent};
 use image::RgbaImage;
-use model::DynamicModel;
+use model::{DynamicModel, Model};
 use screen::Palette;
 use ux::u4;
-use widgets::palette_editor;
+use widgets::{model_selector, palette_editor};
 
 mod hardware;
 mod instruction;
@@ -58,10 +58,11 @@ struct PickRom(Task<Option<(String, Vec<u8>)>>);
 struct UiData {
     paused: bool,
     frame_rate: f64,
+    use_default_framerate: bool,
     cycles_per_frame: u32,
     actual_fps: f64,
     machine_model: DynamicModel,
-    rom_name: String,
+    rom_name: Option<String>,
     palette: Palette,
 }
 
@@ -69,11 +70,12 @@ impl Default for UiData {
     fn default() -> Self {
         Self {
             paused: false,
-            frame_rate: 60.0,
+            frame_rate: model::CosmacVip.default_framerate(),
+            use_default_framerate: true,
             cycles_per_frame: 100,
             actual_fps: 0.0,
             machine_model: DynamicModel::CosmacVip,
-            rom_name: "No ROM loaded".to_owned(),
+            rom_name: None,
             palette: Default::default(),
         }
     }
@@ -128,7 +130,7 @@ fn main() {
 
     App::new()
         .insert_resource(WinitSettings::game())
-        .insert_resource(Time::<Fixed>::from_hz(60.0))
+        .insert_resource(Time::<Fixed>::from_hz(model::CosmacVip.default_framerate()))
         .init_resource::<UiData>()
         .init_resource::<KeyMapping>()
         .add_plugins(
@@ -199,7 +201,6 @@ fn update_ui_data(
     time: Res<Time<Fixed>>,
     diagnostics: Res<DiagnosticsStore>,
 ) {
-    ui_data.frame_rate = 1.0 / time.timestep().as_secs_f64();
     if let Some(fps) = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|fps| fps.smoothed())
@@ -220,31 +221,13 @@ fn emulator_ui_system(
 
         egui::Frame::group(&egui_context.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(&ui_data.rom_name);
+                ui.label(ui_data.rom_name.as_deref().unwrap_or("No ROM loaded"));
                 if ui.button("Choose ROM").clicked() {
                     ui_events.send(UiEvent::PickRom);
                 }
             });
 
-            egui::ComboBox::from_label("Machine type")
-                .selected_text(ui_data.machine_model.to_string())
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut ui_data.machine_model,
-                        DynamicModel::CosmacVip,
-                        DynamicModel::CosmacVip.to_string(),
-                    );
-                    ui.selectable_value(
-                        &mut ui_data.machine_model,
-                        DynamicModel::LegacySuperChip,
-                        DynamicModel::LegacySuperChip.to_string(),
-                    );
-                    ui.selectable_value(
-                        &mut ui_data.machine_model,
-                        DynamicModel::ModernSuperChip,
-                        DynamicModel::ModernSuperChip.to_string(),
-                    );
-                });
+            model_selector(ui, &mut ui_data.machine_model);
 
             if ui.button("Reset Emulator").clicked() {
                 ui_events.send(UiEvent::ResetMachine);
@@ -261,8 +244,20 @@ fn emulator_ui_system(
                     .text("Target FPS"),
             );
             if ui_data.frame_rate != original_tick_rate {
+                ui_data.use_default_framerate = false;
                 ui_events.send(UiEvent::ChangeTickRate(ui_data.frame_rate));
             }
+            if ui
+                .toggle_value(
+                    &mut ui_data.use_default_framerate,
+                    "Use default FPS for system",
+                )
+                .changed()
+                && ui_data.use_default_framerate
+            {
+                ui_data.frame_rate = ui_data.machine_model.default_framerate();
+                ui_events.send(UiEvent::ChangeTickRate(ui_data.frame_rate));
+            };
 
             ui.add(
                 egui::Slider::new(&mut ui_data.cycles_per_frame, 1..=1000)
@@ -285,7 +280,7 @@ fn emulator_ui_system(
 
 fn handle_ui_events(
     mut commands: Commands,
-    ui_data: ResMut<UiData>,
+    mut ui_data: ResMut<UiData>,
     mut ui_events: EventReader<UiEvent>,
     mut time: ResMut<Time<Fixed>>,
     rom: Option<Res<Rom>>,
@@ -299,6 +294,11 @@ fn handle_ui_events(
             }
             UiEvent::ResetMachine => {
                 if let Some(rom) = rom.as_ref() {
+                    if ui_data.use_default_framerate {
+                        let rate = ui_data.machine_model.default_framerate();
+                        ui_data.frame_rate = rate;
+                        time.set_timestep_hz(rate);
+                    }
                     commands.insert_resource(Machine::new(&ui_data.machine_model, &rom.0))
                 }
             }
@@ -358,7 +358,7 @@ fn rom_loaded(
         if let Some(maybe_rom) = block_on(poll_once(&mut task.0)) {
             commands.entity(entity).despawn();
             if let Some(rom) = maybe_rom {
-                ui_data.rom_name = rom.0;
+                ui_data.rom_name = Some(rom.0);
                 commands.insert_resource(Rom(rom.1));
             }
         }

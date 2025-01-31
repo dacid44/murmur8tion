@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::DerefMut};
 
 use rand::SeedableRng;
 
@@ -13,14 +13,21 @@ pub trait Model {
     type Rng: rand::Rng;
     fn init_screen(&self) -> Self::Screen;
     fn init_rng(&self) -> Self::Rng;
+    fn memory_size(&self) -> usize {
+        0x1000
+    }
     fn instruction_set(&self) -> InstructionSet;
     fn quirks(&self) -> &Quirks {
         &CosmacVip::QUIRKS
+    }
+    fn default_framerate(&self) -> f64 {
+        60.0
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Quirks {
+    pub graceful_exit_on_0000: bool,
     pub bitshift_use_y: bool,
     pub key_wait_trigger: KeyEvent,
     pub inc_i_on_slice: bool,
@@ -61,6 +68,7 @@ macro_rules! dynamic_model_method {
                 Self::CosmacVip => CosmacVip.$name($($param), *),
                 Self::LegacySuperChip => LegacySuperChip.$name($($param), *),
                 Self::ModernSuperChip => ModernSuperChip.$name($($param), *),
+                Self::XoChip => XoChip.$name($($param), *),
             }
         }
     }
@@ -71,6 +79,7 @@ pub enum DynamicModel {
     CosmacVip,
     LegacySuperChip,
     ModernSuperChip,
+    XoChip,
 }
 
 impl Display for DynamicModel {
@@ -79,6 +88,7 @@ impl Display for DynamicModel {
             Self::CosmacVip => write!(f, "COSMAC VIP"),
             Self::LegacySuperChip => write!(f, "Legacy SUPER-CHIP (SUPER-CHIP 1.1)"),
             Self::ModernSuperChip => write!(f, "Modern SUPER-CHIP (Octo)"),
+            Self::XoChip => write!(f, "XO-CHIP"),
         }
     }
 }
@@ -92,6 +102,7 @@ impl Model for DynamicModel {
             Self::CosmacVip => DynamicScreen::CosmacVip(Default::default()),
             Self::LegacySuperChip => DynamicScreen::LegacySuperChip(Default::default()),
             Self::ModernSuperChip => DynamicScreen::ModernSuperChip(Default::default()),
+            Self::XoChip => DynamicScreen::XoChip(Default::default()),
         }
     }
 
@@ -99,8 +110,10 @@ impl Model for DynamicModel {
         Box::new(rand_xoshiro::Xoshiro256PlusPlus::from_os_rng())
     }
 
+    dynamic_model_method!(memory_size(self: &Self) -> usize);
     dynamic_model_method!(instruction_set(self: &Self) -> InstructionSet);
     dynamic_model_method!(quirks(self: &Self) -> &Quirks);
+    dynamic_model_method!(default_framerate(self: &Self) -> f64);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,6 +121,7 @@ pub struct CosmacVip;
 
 impl CosmacVip {
     const QUIRKS: Quirks = Quirks {
+        graceful_exit_on_0000: false,
         bitshift_use_y: true,
         key_wait_trigger: KeyEvent::Release,
         inc_i_on_slice: true,
@@ -145,6 +159,7 @@ pub struct LegacySuperChip;
 
 impl LegacySuperChip {
     const QUIRKS: Quirks = Quirks {
+        graceful_exit_on_0000: false,
         bitshift_use_y: false,
         key_wait_trigger: KeyEvent::Release,
         inc_i_on_slice: false,
@@ -175,6 +190,10 @@ impl Model for LegacySuperChip {
     fn quirks(&self) -> &Quirks {
         &Self::QUIRKS
     }
+
+    fn default_framerate(&self) -> f64 {
+        64.0
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -182,6 +201,7 @@ pub struct ModernSuperChip;
 
 impl ModernSuperChip {
     const QUIRKS: Quirks = Quirks {
+        graceful_exit_on_0000: false,
         bitshift_use_y: false,
         key_wait_trigger: KeyEvent::Release,
         inc_i_on_slice: false,
@@ -207,6 +227,48 @@ impl Model for ModernSuperChip {
 
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::SuperChip
+    }
+
+    fn quirks(&self) -> &Quirks {
+        &Self::QUIRKS
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct XoChip;
+
+impl XoChip {
+    const QUIRKS: Quirks = Quirks {
+        graceful_exit_on_0000: false,
+        bitshift_use_y: true,
+        key_wait_trigger: KeyEvent::Release,
+        inc_i_on_slice: true,
+        bitwise_reset_flag: false,
+        draw_wait_for_vblank: DrawWaitSetting::Never,
+        clear_screen_on_mode_switch: true,
+        jump_v0_use_vx: false,
+        lores_draw_large_as_small: false,
+    };
+}
+
+impl Model for XoChip {
+    type Screen = screen::XoChipScreen;
+    type Rng = rand_xoshiro::Xoshiro256PlusPlus;
+
+    fn init_screen(&self) -> Self::Screen {
+        Default::default()
+    }
+
+    fn init_rng(&self) -> Self::Rng {
+        Self::Rng::from_os_rng()
+    }
+
+    fn memory_size(&self) -> usize {
+        0x10000
+    }
+
+    fn instruction_set(&self) -> InstructionSet {
+        InstructionSet::XoChip
     }
 
     fn quirks(&self) -> &Quirks {

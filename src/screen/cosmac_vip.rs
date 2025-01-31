@@ -1,9 +1,8 @@
 use std::ops::BitOr;
 
 use image::RgbaImage;
-use ux::u4;
 
-use super::{draw_line, screen_to_image, Palette, Result, Screen, UnsupportedScreenOperation};
+use super::{draw_line_clipping, screen_to_image, Palette, Screen};
 
 #[derive(Default)]
 pub struct CosmacVipScreen(Box<[u64; 32]>);
@@ -26,36 +25,12 @@ impl Screen for CosmacVipScreen {
         self.0 = Default::default();
     }
 
-    fn get_hires(&self) -> bool {
-        false
-    }
-
-    fn set_hires(&mut self, _hires: bool) -> Result<()> {
-        Err(UnsupportedScreenOperation::HiresMode)
-    }
-
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
         sprite
             .iter()
             .zip(self.0[(y % Self::HEIGHT) as usize..].iter_mut())
-            .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
+            .map(|(line, dest)| draw_line_clipping(dest, x % Self::WIDTH, *line))
             .fold(false, BitOr::bitor)
-    }
-
-    fn draw_large_sprite(&mut self, _x: u8, _y: u8, _sprite: &[u8; 32]) -> Result<u8> {
-        Err(UnsupportedScreenOperation::LargeSprite)
-    }
-
-    fn scroll_down(&mut self, _amount: u4) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollDown)
-    }
-
-    fn scroll_right(&mut self) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollRight)
-    }
-
-    fn scroll_left(&mut self) -> Result<()> {
-        Err(UnsupportedScreenOperation::ScrollLeft)
     }
 
     fn to_image(&self, palette: &Palette) -> RgbaImage {

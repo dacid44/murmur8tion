@@ -1,11 +1,12 @@
 mod cosmac_vip;
 mod schip;
+mod xochip;
 
 use std::{
     cmp::Ordering,
     fmt::Binary,
     mem,
-    ops::{BitAnd, BitOr, BitXorAssign, Shl, ShlAssign, Shr},
+    ops::{BitAnd, BitXorAssign, Shl, ShlAssign, Shr},
 };
 
 use image::{Rgba, RgbaImage};
@@ -15,9 +16,7 @@ use ux::u4;
 
 pub use cosmac_vip::CosmacVipScreen;
 pub use schip::{LegacySuperChipScreen, ModernSuperChipScreen};
-
-const ON_COLOR: Rgba<u8> = Rgba([0, 100, 0, 255]);
-const OFF_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
+pub use xochip::XoChipScreen;
 
 // from https://github.com/gulrak/cadmium/blob/1e1f524c4d1c5ceff3b3da8818f0ed815e9160db/src/cadmium.cpp#L1893-L1898
 const CADMIUM_PALETTE: [u32; 16] = [
@@ -64,12 +63,16 @@ impl Palette {
 pub enum UnsupportedScreenOperation {
     #[error("this screen type does not support hires mode")]
     HiresMode,
+    #[error("this screen type does not support multiple display planes")]
+    SetPlanes,
     #[error("large sprites are not supported with this screen type")]
     LargeSprite,
     #[error("large sprites are not supported in lores mode on with this screen type")]
     LargeSpriteInLores,
     #[error("scrolling (down) is not supported with this screen type")]
     ScrollDown,
+    #[error("scrolling (up) is not supported with this screen type")]
+    ScrollUp,
     #[error("scrolling (right) is not supported with this screen type")]
     ScrollRight,
     #[error("scrolling (left) is not supported with this screen type")]
@@ -82,13 +85,31 @@ pub trait Screen {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
-    fn get_hires(&self) -> bool;
-    fn set_hires(&mut self, hires: bool) -> Result<()>;
+    fn get_hires(&self) -> bool {
+        false
+    }
+    fn set_hires(&mut self, _hires: bool) -> Result<()> {
+        Err(UnsupportedScreenOperation::HiresMode)
+    }
+    fn set_planes(&mut self, _planes: u4) -> Result<()> {
+        Err(UnsupportedScreenOperation::SetPlanes)
+    }
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool;
-    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8>;
-    fn scroll_down(&mut self, amount: u4) -> Result<()>;
-    fn scroll_right(&mut self) -> Result<()>;
-    fn scroll_left(&mut self) -> Result<()>;
+    fn draw_large_sprite(&mut self, _x: u8, _y: u8, _sprite: &[u8; 32]) -> Result<u8> {
+        Err(UnsupportedScreenOperation::LargeSprite)
+    }
+    fn scroll_down(&mut self, _amount: u4) -> Result<()> {
+        Err(UnsupportedScreenOperation::ScrollDown)
+    }
+    fn scroll_up(&mut self, _amount: u4) -> Result<()> {
+        Err(UnsupportedScreenOperation::ScrollUp)
+    }
+    fn scroll_right(&mut self) -> Result<()> {
+        Err(UnsupportedScreenOperation::ScrollRight)
+    }
+    fn scroll_left(&mut self) -> Result<()> {
+        Err(UnsupportedScreenOperation::ScrollLeft)
+    }
     fn to_image(&self, palette: &Palette) -> RgbaImage;
 }
 
@@ -96,9 +117,10 @@ macro_rules! screen_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
-                Self::CosmacVip(machine) => Screen::$name(machine$(, $param)*),
-                Self::LegacySuperChip(machine) => Screen::$name(machine$(, $param)*),
-                Self::ModernSuperChip(machine) => Screen::$name(machine$(, $param)*),
+                Self::CosmacVip(screen) => Screen::$name(screen$(, $param)*),
+                Self::LegacySuperChip(screen) => Screen::$name(screen$(, $param)*),
+                Self::ModernSuperChip(screen) => Screen::$name(screen$(, $param)*),
+                Self::XoChip(screen) => Screen::$name(screen$(, $param)*),
             }
         }
     }
@@ -108,6 +130,7 @@ pub enum DynamicScreen {
     CosmacVip(CosmacVipScreen),
     LegacySuperChip(LegacySuperChipScreen),
     ModernSuperChip(ModernSuperChipScreen),
+    XoChip(XoChipScreen),
 }
 
 impl Screen for DynamicScreen {
@@ -116,9 +139,11 @@ impl Screen for DynamicScreen {
     screen_method!(clear(self: &mut Self));
     screen_method!(get_hires(self: &Self) -> bool);
     screen_method!(set_hires(self: &mut Self, hires: bool) -> Result<()>);
+    screen_method!(set_planes(self: &mut Self, planes: u4) -> Result<()>);
     screen_method!(draw_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8]) -> bool);
     screen_method!(draw_large_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8>);
     screen_method!(scroll_down(self: &mut Self, amount: u4) -> Result<()>);
+    screen_method!(scroll_up(self: &mut Self, amount: u4) -> Result<()>);
     screen_method!(scroll_right(self: &mut Self) -> Result<()>);
     screen_method!(scroll_left(self: &mut Self) -> Result<()>);
     screen_method!(to_image(self: &Self, palette: &Palette) -> RgbaImage);
@@ -144,7 +169,7 @@ pub const FONT: [[u8; 5]; 16] = [
     [0xF0, 0x80, 0xF0, 0x80, 0x80],
 ];
 
-pub const SCHIP_HIRES_FONT_ADDRESS: usize = 0x100;
+pub const SCHIP_HIRES_FONT_ADDRESS: usize = FONT_ADDRESS + 80;
 pub const SCHIP_HIRES_FONT: [[u8; 10]; 10] = [
     [0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C],
     [0x18, 0x38, 0x58, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C],
@@ -158,7 +183,27 @@ pub const SCHIP_HIRES_FONT: [[u8; 10]; 10] = [
     [0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C],
 ];
 
-fn draw_line<D, L>(dest: &mut D, x: u8, line: L) -> bool
+pub const XOCHIP_HIRES_FONT_ADDRESS: usize = FONT_ADDRESS + 80;
+pub const XOCHIP_HIRES_FONT: [[u8; 10]; 16] = [
+    [0x3C, 0x7E, 0x66, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x7E, 0x3C],
+    [0x0C, 0x1C, 0x3C, 0x6C, 0x0C, 0x0C, 0x0C, 0x0C, 0x7E, 0x7E],
+    [0x3C, 0x7E, 0x66, 0x06, 0x0E, 0x1C, 0x38, 0x70, 0x7E, 0x7E],
+    [0x3C, 0x7E, 0x66, 0x06, 0x1C, 0x1C, 0x06, 0x66, 0x7E, 0x3C],
+    [0x6C, 0x6C, 0x6C, 0x6C, 0x7E, 0x7E, 0x0C, 0x0C, 0x0C, 0x0C],
+    [0x7C, 0x7C, 0x60, 0x60, 0x7C, 0x3E, 0x06, 0x66, 0x7E, 0x3C],
+    [0x3C, 0x7E, 0x66, 0x60, 0x7C, 0x7E, 0x66, 0x66, 0x7E, 0x3C],
+    [0x7E, 0x7E, 0x06, 0x0E, 0x0C, 0x18, 0x18, 0x30, 0x30, 0x30],
+    [0x3C, 0x7E, 0x66, 0x66, 0x3C, 0x3C, 0x66, 0x66, 0x7E, 0x3C],
+    [0x3C, 0x7E, 0x66, 0x66, 0x7E, 0x3E, 0x06, 0x66, 0x7E, 0x3C],
+    [0x3C, 0x7E, 0x66, 0x66, 0x7E, 0x7E, 0x66, 0x66, 0x66, 0x66],
+    [0x7C, 0x7E, 0x66, 0x66, 0x7C, 0x7C, 0x66, 0x66, 0x7E, 0x7C],
+    [0x3C, 0x7E, 0x66, 0x66, 0x60, 0x60, 0x66, 0x66, 0x7E, 0x3C],
+    [0x7C, 0x7E, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x7E, 0x7C],
+    [0x7E, 0x7E, 0x60, 0x60, 0x78, 0x78, 0x60, 0x60, 0x7E, 0x7E],
+    [0x7E, 0x7E, 0x60, 0x60, 0x78, 0x78, 0x60, 0x60, 0x60, 0x60],
+];
+
+fn draw_line_clipping<D, L>(dest: &mut D, x: u8, line: L) -> bool
 where
     D: Copy
         + From<L>
@@ -169,12 +214,21 @@ where
         + BitAnd<Output = D>
         + PartialEq,
 {
+    draw_line(dest, x, line, Shl::shl, Shr::shr)
+}
+
+fn draw_line<D, L, LF, RF>(dest: &mut D, x: u8, line: L, lshift: LF, rshift: RF) -> bool
+where
+    D: Copy + From<L> + From<u8> + BitXorAssign + BitAnd<Output = D> + PartialEq,
+    LF: Fn(D, u8) -> D,
+    RF: Fn(D, u8) -> D,
+{
     let width_difference = (mem::size_of::<D>() - mem::size_of::<L>()) as u8 * 8;
     let line = D::from(line);
     let mask = match x.cmp(&width_difference) {
-        Ordering::Less => line << (width_difference - x),
+        Ordering::Less => lshift(line, width_difference - x),
         Ordering::Equal => line,
-        Ordering::Greater => line >> (x - width_difference),
+        Ordering::Greater => rshift(line, x - width_difference),
     };
 
     let collided = *dest & mask != D::from(0);
@@ -301,6 +355,7 @@ fn u64_nibbles(x: u64) -> [u8; 16] {
     x = (x | x << 32) & 0x00000000FFFFFFFF00000000FFFFFFFF;
     x = (x | x << 16) & 0x0000FFFF0000FFFF0000FFFF0000FFFF;
     x = (x | x << 8) & 0x00FF00FF00FF00FF00FF00FF00FF00FF;
+    x = (x | x << 4) & 0x0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F;
     x.to_be_bytes()
 }
 

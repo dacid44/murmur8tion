@@ -4,7 +4,8 @@ use image::RgbaImage;
 use ux::u4;
 
 use super::{
-    double_bits_holger, double_bits_magic, draw_line, screen_to_image, Palette, Result, Screen,
+    double_bits_holger, double_bits_magic, draw_line_clipping, screen_to_image, Palette, Result,
+    Screen,
 };
 
 pub struct LegacySuperChipScreen {
@@ -53,7 +54,7 @@ impl Screen for LegacySuperChipScreen {
             sprite
                 .iter()
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
+                .map(|(line, dest)| draw_line_clipping(dest, x % Self::WIDTH, *line))
                 .fold(false, BitOr::bitor)
         } else {
             let x = (x << 1) % Self::WIDTH;
@@ -65,7 +66,7 @@ impl Screen for LegacySuperChipScreen {
                 .map(double_bits_holger)
                 .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
                 .map(|(line, dest)| {
-                    let collided = draw_line(&mut dest[0], x, line);
+                    let collided = draw_line_clipping(&mut dest[0], x, line);
                     dest[1] = (dest[1] & !mask) | (dest[0] & mask);
                     collided
                 })
@@ -79,7 +80,7 @@ impl Screen for LegacySuperChipScreen {
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, line) as u8)
+                .map(|(line, dest)| draw_line_clipping(dest, x % Self::WIDTH, line) as u8)
                 .sum()
         } else {
             return Err(super::UnsupportedScreenOperation::LargeSpriteInLores);
@@ -167,7 +168,7 @@ impl Screen for ModernSuperChipScreen {
             sprite
                 .iter()
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, *line))
+                .map(|(line, dest)| draw_line_clipping(dest, x % Self::WIDTH, *line))
                 .fold(false, BitOr::bitor)
         } else {
             let x = (x << 1) % Self::WIDTH;
@@ -177,7 +178,8 @@ impl Screen for ModernSuperChipScreen {
                 .map(double_bits_holger)
                 .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
                 .map(|(line, dest)| {
-                    draw_line(&mut dest[0], x, line) | draw_line(&mut dest[1], x, line)
+                    draw_line_clipping(&mut dest[0], x, line)
+                        | draw_line_clipping(&mut dest[1], x, line)
                 })
                 .fold(false, BitOr::bitor)
         }
@@ -189,8 +191,8 @@ impl Screen for ModernSuperChipScreen {
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
-                .map(|(line, dest)| draw_line(dest, x % Self::WIDTH, line) as u8)
-                .sum()
+                .map(|(line, dest)| draw_line_clipping(dest, x % Self::WIDTH, line))
+                .fold(false, BitOr::bitor)
         } else {
             let x = (x << 1) % Self::WIDTH;
             sprite
@@ -199,11 +201,12 @@ impl Screen for ModernSuperChipScreen {
                 .map(double_bits_magic)
                 .zip(self.data[((y << 1) % Self::HEIGHT) as usize..].chunks_exact_mut(2))
                 .map(|(line, dest)| {
-                    draw_line(&mut dest[0], x, line) as u8 + draw_line(&mut dest[1], x, line) as u8
+                    draw_line_clipping(&mut dest[0], x, line)
+                        | draw_line_clipping(&mut dest[1], x, line)
                 })
-                .sum()
+                .fold(false, BitOr::bitor)
         };
-        Ok(collided)
+        Ok(collided as u8)
     }
 
     fn scroll_down(&mut self, amount: u4) -> Result<()> {

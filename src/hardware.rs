@@ -8,6 +8,7 @@ use thiserror::Error;
 use ux::u4;
 
 use crate::{
+    audio::DEFAULT_PATTERN,
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction, XoChipInstruction},
     model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip, XoChip},
     screen::{self, Palette, Screen},
@@ -82,6 +83,8 @@ impl DynamicMachine {
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
     dynamic_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
     dynamic_machine_method!(sound_active(self: &Self) -> bool);
+    dynamic_machine_method!(pitch(self: &Self) -> u8);
+    dynamic_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
 }
 
@@ -239,6 +242,8 @@ pub struct Chip8<Model: model::Model> {
     rng: Model::Rng,
     vblank: bool,
     rpl: [u8; 16],
+    pitch: u8,
+    audio_pattern: [u8; 16],
 }
 
 impl<Model: model::Model> Chip8<Model> {
@@ -263,6 +268,8 @@ impl<Model: model::Model> Chip8<Model> {
             rng,
             vblank: false,
             rpl: [0; 16],
+            pitch: 64,
+            audio_pattern: DEFAULT_PATTERN.to_be_bytes(),
         }
     }
 
@@ -283,6 +290,14 @@ impl<Model: model::Model> Chip8<Model> {
 
     pub fn sound_active(&self) -> bool {
         self.cpu.st > 0
+    }
+
+    pub fn pitch(&self) -> u8 {
+        self.pitch
+    }
+
+    pub fn audio_pattern(&self) -> &[u8; 16] {
+        &self.audio_pattern
     }
 
     fn mem_slice<R: IntoUsizeRange<I>, I>(&self, range: R) -> Result<&[u8]> {
@@ -580,8 +595,14 @@ impl<Model: model::Model> Chip8<Model> {
                             self.cpu.i = addr;
                         }
                         Xci::SelectPlanes { x } => self.screen.set_planes(x)?,
-                        Xci::WriteAudio => todo!("custom audio not implemented yet"),
-                        Xci::SetPitch { x } => todo!("custom pitch not implementd yet"),
+                        Xci::WriteAudio => {
+                            let mut data = [0; 16];
+                            data.copy_from_slice(
+                                self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + 16)?,
+                            );
+                            self.audio_pattern = data;
+                        }
+                        Xci::SetPitch { x } => self.pitch = self.cpu.get_v(x),
                     }
                 } else {
                     self.cpu.dec_pc();

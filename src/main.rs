@@ -1,6 +1,8 @@
 use std::{collections::VecDeque, time::Duration};
 
+use audio::Chip8Audio;
 use bevy::{
+    audio::AddAudioSource,
     color::palettes::css,
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     input::{keyboard::KeyboardInput, ButtonState},
@@ -21,6 +23,7 @@ use screen::Palette;
 use ux::u4;
 use widgets::{model_selector, palette_editor};
 
+mod audio;
 mod hardware;
 mod instruction;
 mod model;
@@ -163,13 +166,14 @@ fn main() {
             machine_system.run_if(resource_exists::<Machine>),
         )
         .add_systems(FixedPostUpdate, machine_audio)
+        .add_audio_source::<Chip8Audio>()
         .run();
 }
 
 fn setup_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    mut pitch_assets: ResMut<Assets<Pitch>>,
+    mut beeper_assets: ResMut<Assets<Chip8Audio>>,
 ) {
     commands.spawn(Camera2d);
 
@@ -188,17 +192,18 @@ fn setup_system(
     let handle = images.add(image);
 
     let sprite = commands.spawn(Sprite::from_image(handle.clone())).id();
-    let pitch = pitch_assets.add(Pitch::new(261.63, Duration::from_secs(3600)));
     commands.insert_resource(EmulatorFrame {
         frame_handle: handle,
         frame_sprite: sprite,
     });
-    commands.spawn((AudioPlayer(pitch), PlaybackSettings::LOOP.paused()));
+    let beeper = Chip8Audio::new(Default::default());
+    let beeper_handle = beeper_assets.add(beeper.clone());
+    commands.spawn(AudioPlayer(beeper_handle));
+    commands.insert_resource(beeper);
 }
 
 fn update_ui_data(
     mut ui_data: ResMut<UiData>,
-    time: Res<Time<Fixed>>,
     diagnostics: Res<DiagnosticsStore>,
 ) {
     if let Some(fps) = diagnostics
@@ -324,7 +329,7 @@ fn pick_rom() -> PickRom {
     let task = IoTaskPool::get().spawn(async {
         let file = rfd::AsyncFileDialog::new()
             .set_title("Choose a ROM file")
-            .add_filter("Chip-8 ROMs", &["ch8"])
+            .add_filter("Chip-8 ROMs", &["ch8", "xo8"])
             .pick_file()
             .await?;
 
@@ -418,13 +423,17 @@ fn machine_system(
 fn machine_audio(
     machine: Option<Res<Machine>>,
     ui_data: Res<UiData>,
-    beep: Query<&AudioSink, With<AudioPlayer<Pitch>>>,
+    mut audio: ResMut<Chip8Audio>,
 ) {
-    let is_machine_sound_active = machine.is_some_and(|machine| machine.machine.sound_active());
-    let beep = beep.single();
-    if beep.is_paused() == (is_machine_sound_active && !ui_data.paused) {
-        beep.toggle();
-    }
+    audio.edit(|audio| {
+        if let Some(machine) = machine.as_ref() {
+            audio.set_active(machine.machine.sound_active() && !ui_data.paused);
+            audio.set_pitch(machine.machine.pitch());
+            audio.set_pattern(*machine.machine.audio_pattern());
+        } else {
+            *audio = Default::default();
+        }
+    });
 }
 
 fn write_frame(texture: &mut Image, frame: RgbaImage) {

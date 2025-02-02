@@ -1,9 +1,9 @@
-use std::{fmt::Display, ops::DerefMut};
+use std::fmt::Display;
 
 use rand::SeedableRng;
 
 use crate::{
-    hardware::{Chip8, KeyEvent},
+    hardware::KeyEvent,
     instruction::InstructionSet,
     screen::{self, DynamicScreen},
 };

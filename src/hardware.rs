@@ -1,14 +1,12 @@
-use std::{
-    mem,
-    ops::{Bound, RangeBounds, Sub},
-};
+use std::ops::{Bound, RangeBounds, Sub};
 
+use bevy::log::warn;
 use rand::Rng;
 use thiserror::Error;
 use ux::u4;
 
 use crate::{
-    audio::DEFAULT_PATTERN,
+    frontend::audio::DEFAULT_PATTERN,
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction, XoChipInstruction},
     model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip, XoChip},
     screen::{self, Palette, Screen},
@@ -248,7 +246,8 @@ pub struct Chip8<Model: model::Model> {
 
 impl<Model: model::Model> Chip8<Model> {
     pub fn new(model: Model, rom: &[u8]) -> Self {
-        let mut memory = bytemuck::zeroed_slice_box(model.memory_size());
+        let memory_size = model.memory_size();
+        let mut memory = bytemuck::zeroed_slice_box(memory_size);
         let font_slice: &[u8] = screen::FONT.as_flattened();
         memory[screen::FONT_ADDRESS..screen::FONT_ADDRESS + font_slice.len()]
             .copy_from_slice(font_slice);
@@ -256,7 +255,12 @@ impl<Model: model::Model> Chip8<Model> {
         memory[screen::XOCHIP_HIRES_FONT_ADDRESS
             ..screen::XOCHIP_HIRES_FONT_ADDRESS + hires_font_slice.len()]
             .copy_from_slice(hires_font_slice);
-        memory[0x200..0x200 + rom.len()].copy_from_slice(rom);
+        if let Some(slice) = memory.get_mut(0x200..0x200 + rom.len()) {
+            slice.copy_from_slice(rom);
+        } else {
+            warn!("ROM is too big to completely load into memory");
+            memory[0x200..].copy_from_slice(&rom[..memory_size - 0x200]);
+        }
         let screen = model.init_screen();
         let rng = model.init_rng();
         Self {

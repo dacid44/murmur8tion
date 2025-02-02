@@ -1,8 +1,4 @@
-use std::{
-    ops::DerefMut,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use bevy::{
     asset::Asset,
@@ -34,6 +30,10 @@ impl Chip8Audio {
         let source = rodio::buffer::SamplesBuffer::new(1, OUTPUT_SAMPLE_RATE, samples);
         self.queue_input.append(source);
     }
+
+    pub fn reset(&mut self) {
+        self.synth.reset()
+    }
 }
 
 impl Decodable for Chip8Audio {
@@ -61,92 +61,6 @@ impl Decodable for Chip8Audio {
 
 pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF00FF00FF00FF00FFu128.to_be_bytes();
 
-pub struct Chip8Source {
-    active: bool,
-    rate: f64,
-    pattern: u128,
-    counter: f64,
-}
-
-
-impl Chip8Source {
-    const DEFAULT_PATTERN: u128 = 0x00FF00FF00FF00FF00FF00FF00FF00FF;
-
-    pub fn new(pitch: u8, pattern_buffer: [u8; 16]) -> Self {
-        Self {
-            active: false,
-            rate: pitch_to_rate(pitch),
-            pattern: u128::from_be_bytes(pattern_buffer),
-            counter: 0.0,
-        }
-    }
-
-    pub fn set_from(&mut self, other: &Self) {
-        self.set_active(other.active);
-        self.rate = other.rate;
-        self.pattern = other.pattern;
-    }
-
-    pub fn set_active(&mut self, active: bool) {
-        self.active = active;
-        if !active {
-            self.counter = 0.0;
-        }
-    }
-
-    pub fn set_pitch(&mut self, pitch: u8) {
-        self.rate = pitch_to_rate(pitch);
-    }
-
-    pub fn set_pattern(&mut self, pattern: [u8; 16]) {
-        self.pattern = u128::from_be_bytes(pattern);
-    }
-}
-
-impl Default for Chip8Source {
-    fn default() -> Self {
-        Self {
-            active: false,
-            rate: 4000.0,
-            pattern: Self::DEFAULT_PATTERN,
-            counter: 0.0,
-        }
-    }
-}
-
-impl Iterator for Chip8Source {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.active {
-            return Some(0.0);
-        }
-        self.counter += self.rate / 44100.0;
-        self.counter %= 128.0;
-        let index = self.counter.round() as u8;
-        let sample = self.pattern & (0b1 << (127 - index)) != 0;
-        Some(if sample { 0.35 } else { -0.35 })
-    }
-}
-
-impl Source for Chip8Source {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        44100
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
-}
-
 const OUTPUT_SAMPLE_RATE: u32 = 44100;
 
 #[derive(Debug, Clone)]
@@ -156,9 +70,7 @@ struct Chip8Synth {
 
 impl Chip8Synth {
     fn new() -> Self {
-        Self {
-            counter: 0.0,
-        }
+        Self { counter: 0.0 }
     }
 
     fn generate_samples(&mut self, pitch: u8, pattern: [u8; 16], timestep: f64) -> Vec<f32> {

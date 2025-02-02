@@ -7,7 +7,7 @@ use bevy::{
 };
 use image::RgbaImage;
 use keymap::KeyMapping;
-use ux::u4;
+use arbitrary_int::u4;
 
 use crate::{
     hardware::{DynamicMachine, KeyEvent},

@@ -1,5 +1,5 @@
+use arbitrary_int::u4;
 use bevy::{ecs::system::Resource, input::keyboard::KeyCode, utils::HashMap};
-use ux::u4;
 
 #[derive(Resource)]
 pub struct KeyMapping {
@@ -31,7 +31,7 @@ impl Default for KeyMapping {
             keys: DEFAULT_KEY_MAPPING
                 .iter()
                 .enumerate()
-                .map(|(i, key)| (*key, i.try_into().unwrap()))
+                .map(|(i, key)| (*key, u4::from_u8(i as u8)))
                 .collect(),
         }
     }

@@ -12,7 +12,7 @@ use std::{
 use image::{Rgba, RgbaImage};
 use num_traits::PrimInt;
 use thiserror::Error;
-use ux::u4;
+use arbitrary_int::u4;
 
 pub use cosmac_vip::CosmacVipScreen;
 pub use schip::{LegacySuperChipScreen, ModernSuperChipScreen};

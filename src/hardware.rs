@@ -3,7 +3,7 @@ use std::ops::{Bound, RangeBounds, Sub};
 use bevy::log::warn;
 use rand::Rng;
 use thiserror::Error;
-use ux::u4;
+use arbitrary_int::{u4, Number};
 
 use crate::{
     frontend::audio::DEFAULT_PATTERN,
@@ -123,7 +123,7 @@ impl Cpu {
         if self.sp == u4::MAX {
             return Err(Error::StackFull);
         }
-        self.sp = self.sp + u4::new(1);
+        self.sp += u4::new(1);
         self.stack[u8::from(self.sp) as usize] = self.pc;
         Ok(())
     }
@@ -133,7 +133,7 @@ impl Cpu {
             return Err(Error::StackEmpty);
         }
         self.pc = self.stack[u8::from(self.sp) as usize];
-        self.sp = self.sp - u4::new(1);
+        self.sp -= u4::new(1);
         Ok(())
     }
 

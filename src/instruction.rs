@@ -1,4 +1,5 @@
-use ux::{u12, u2, u4};
+use arbitrary_int::{u12, u2, u4};
+use bitbybit::bitfield;
 
 macro_rules! match_ux {
     ($type:path; $match_type:ident; $max:literal; $x: expr; $name: ident; $($match:tt)*) => {
@@ -13,12 +14,12 @@ macro_rules! match_ux {
 }
 
 macro_rules! match_u4 {
-    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::ux::u4; u8; 0x10; $x; $name; $($match)* } };
+    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::arbitrary_int::u4; u8; 0x10; $x; $name; $($match)* } };
     ($x:expr; $($match:tt)*) => { match_u4!{$x; x; $($match)* } };
 }
 
 macro_rules! match_u12 {
-    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::ux::u12; u16; 0x1000; $x; $name; $($match)* } };
+    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::arbitrary_int::u12; u16; 0x1000; $x; $name; $($match)* } };
     ($x:expr; $($match:tt)*) => { match_u12!{$x; x; $($match)* } };
 }
 
@@ -29,45 +30,34 @@ pub enum InstructionSet {
     XoChip,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RawInstruction(u16);
+#[bitfield(u16)]
+struct RawInstruction {
+    #[bits(0..=3, r)]
+    nibble: [u4; 4],
 
-impl RawInstruction {
-    fn nibble(self, i: u2) -> u4 {
-        (self.0 >> (u8::from(i) * 4) & 0x000F).try_into().unwrap()
-    }
+    #[bits(12..=15, r)]
+    discriminant1: u4,
 
-    fn discriminant1(self) -> u4 {
-        self.nibble(u2::new(3))
-    }
+    #[bits(0..=7, r)]
+    discriminant2: u8,
 
-    fn discriminant2(self) -> u8 {
-        (self.0 & 0x00FF).try_into().unwrap()
-    }
+    #[bits(0..=3, r)]
+    discriminant3: u4,
 
-    fn discriminant3(self) -> u4 {
-        self.nibble(u2::new(0))
-    }
+    #[bits(0..=11, r)]
+    nnn: u12,
 
-    fn nnn(self) -> u12 {
-        (self.0 & 0x0FFF).try_into().unwrap()
-    }
+    #[bits(0..=3, r)]
+    n: u4,
 
-    fn n(self) -> u4 {
-        self.nibble(u2::new(0))
-    }
+    #[bits(8..=11, r)]
+    x: u4,
 
-    fn x(self) -> u4 {
-        self.nibble(u2::new(2))
-    }
+    #[bits(4..=7, r)]
+    y: u4,
 
-    fn y(self) -> u4 {
-        self.nibble(u2::new(1))
-    }
-
-    fn kk(self) -> u8 {
-        (self.0 & 0x00FF).try_into().unwrap()
-    }
+    #[bits(0..=7, r)]
+    kk: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -146,7 +136,7 @@ impl Instruction {
         use SuperChipInstruction as Sci;
         use XoChipInstruction as Xci;
 
-        let instruction = RawInstruction(instruction);
+        let instruction = RawInstruction::new_with_raw_value(instruction);
         Some(match_u4! {instruction.discriminant1();
             0x0 => match_u12! {instruction.nnn(); nnn;
                 0x000 => Self::Exit0,
@@ -237,16 +227,25 @@ impl Instruction {
 
 #[cfg(test)]
 mod test {
-    use ux::{u2, u4};
+    use arbitrary_int::{u12, u4};
 
     use super::RawInstruction;
 
     #[test]
     fn test_nibbles() {
-        let raw_instruction = RawInstruction(0x1234);
-        assert_eq!(raw_instruction.nibble(u2::new(0)), u4::new(0x4));
-        assert_eq!(raw_instruction.nibble(u2::new(1)), u4::new(0x3));
-        assert_eq!(raw_instruction.nibble(u2::new(2)), u4::new(0x2));
-        assert_eq!(raw_instruction.nibble(u2::new(3)), u4::new(0x1));
+        let raw_instruction = RawInstruction::new_with_raw_value(0x1234);
+        assert_eq!(raw_instruction.nibble(0), u4::new(0x4));
+        assert_eq!(raw_instruction.nibble(1), u4::new(0x3));
+        assert_eq!(raw_instruction.nibble(2), u4::new(0x2));
+        assert_eq!(raw_instruction.nibble(3), u4::new(0x1));
+
+        assert_eq!(raw_instruction.discriminant1(), u4::new(0x1));
+        assert_eq!(raw_instruction.discriminant2(), 0x34);
+        assert_eq!(raw_instruction.discriminant3(), u4::new(0x4));
+        assert_eq!(raw_instruction.nnn(), u12::new(0x234));
+        assert_eq!(raw_instruction.n(), u4::new(0x4));
+        assert_eq!(raw_instruction.x(), u4::new(0x2));
+        assert_eq!(raw_instruction.y(), u4::new(0x3));
+        assert_eq!(raw_instruction.kk(), 0x34);
     }
 }

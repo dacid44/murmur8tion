@@ -1440,6 +1440,7 @@ dependencies = [
  "rand 0.9.0",
  "rand_xoshiro",
  "rfd",
+ "rodio",
  "thiserror 2.0.11",
  "ux",
 ]

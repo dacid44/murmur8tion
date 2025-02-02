@@ -10,22 +10,29 @@ use bevy::{
     ecs::system::Resource,
     reflect::TypePath,
 };
+use rodio::queue::{SourcesQueueInput, SourcesQueueOutput};
 
 #[derive(Clone, Asset, TypePath, Resource)]
 pub struct Chip8Audio {
-    source: Arc<Mutex<Chip8Source>>,
+    synth: Chip8Synth,
+    queue_input: Arc<SourcesQueueInput<f32>>,
+    queue_output: Arc<Mutex<Option<SourcesQueueOutput<f32>>>>,
 }
 
 impl Chip8Audio {
-    pub fn new(source: Chip8Source) -> Self {
+    pub fn new() -> Self {
+        let (tx, rx) = rodio::queue::queue(true);
         Self {
-            source: Arc::new(Mutex::new(source)),
+            synth: Chip8Synth::new(),
+            queue_input: tx,
+            queue_output: Arc::new(Mutex::new(Some(rx))),
         }
     }
 
-    pub fn edit<T>(&self, f: impl FnOnce(&mut Chip8Source) -> T) -> T {
-        let mut source = self.source.lock().unwrap();
-        f(source.deref_mut())
+    pub fn render_audio(&mut self, pitch: u8, pattern: [u8; 16], timestep: f64) {
+        let samples = self.synth.generate_samples(pitch, pattern, timestep);
+        let source = rodio::buffer::SamplesBuffer::new(1, OUTPUT_SAMPLE_RATE, samples);
+        self.queue_input.append(source);
     }
 }
 
@@ -34,18 +41,25 @@ impl Decodable for Chip8Audio {
     type Decoder = Box<dyn Source<Item = f32> + Send>;
 
     fn decoder(&self) -> Self::Decoder {
-        let beeper = self.source.clone();
-        Box::new(Chip8Source::default().periodic_access(
-            Duration::from_secs_f64(1.0 / 1000.0),
-            move |stream| {
-                let beeper = beeper.lock().unwrap();
-                stream.set_from(&beeper);
-            },
-        ))
+        // let beeper = self.source.clone();
+        // Box::new(Chip8Source::default().periodic_access(
+        //     Duration::from_secs_f64(1.0 / 1000.0),
+        //     move |stream| {
+        //         let beeper = beeper.lock().unwrap();
+        //         stream.set_from(&beeper);
+        //     },
+        // ));
+        let rx = self
+            .queue_output
+            .lock()
+            .unwrap()
+            .take()
+            .expect("Chip8Audio decoded a second time");
+        Box::new(rx.amplify(0.15))
     }
 }
 
-pub const DEFAULT_PATTERN: u128 = 0x00FF00FF00FF00FF00FF00FF00FF00FF;
+pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF00FF00FF00FF00FFu128.to_be_bytes();
 
 pub struct Chip8Source {
     active: bool,
@@ -53,6 +67,7 @@ pub struct Chip8Source {
     pattern: u128,
     counter: f64,
 }
+
 
 impl Chip8Source {
     const DEFAULT_PATTERN: u128 = 0x00FF00FF00FF00FF00FF00FF00FF00FF;
@@ -110,7 +125,7 @@ impl Iterator for Chip8Source {
         self.counter %= 128.0;
         let index = self.counter.round() as u8;
         let sample = self.pattern & (0b1 << (127 - index)) != 0;
-        Some(if sample { 1.0 } else { -1.0 })
+        Some(if sample { 0.35 } else { -0.35 })
     }
 }
 
@@ -129,6 +144,43 @@ impl Source for Chip8Source {
 
     fn total_duration(&self) -> Option<Duration> {
         None
+    }
+}
+
+const OUTPUT_SAMPLE_RATE: u32 = 44100;
+
+#[derive(Debug, Clone)]
+struct Chip8Synth {
+    counter: f64,
+}
+
+impl Chip8Synth {
+    fn new() -> Self {
+        Self {
+            counter: 0.0,
+        }
+    }
+
+    fn generate_samples(&mut self, pitch: u8, pattern: [u8; 16], timestep: f64) -> Vec<f32> {
+        let needed_samples = (timestep * OUTPUT_SAMPLE_RATE as f64).round() as usize;
+        let rate = pitch_to_rate(pitch);
+        let pattern = u128::from_be_bytes(pattern);
+        let mut samples = Vec::new();
+        for _ in 0..needed_samples {
+            self.counter += rate / OUTPUT_SAMPLE_RATE as f64;
+            self.counter %= 128.0;
+            let index = self.counter.round() as u8;
+            if pattern & (0b1 << (127 - index)) != 0 {
+                samples.push(1.0);
+            } else {
+                samples.push(-1.0);
+            }
+        }
+        samples
+    }
+
+    fn reset(&mut self) {
+        self.counter = 0.0;
     }
 }
 

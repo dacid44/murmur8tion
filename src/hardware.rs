@@ -269,7 +269,7 @@ impl<Model: model::Model> Chip8<Model> {
             vblank: false,
             rpl: [0; 16],
             pitch: 64,
-            audio_pattern: DEFAULT_PATTERN.to_be_bytes(),
+            audio_pattern: DEFAULT_PATTERN,
         }
     }
 

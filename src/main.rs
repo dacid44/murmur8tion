@@ -4,7 +4,10 @@ use audio::Chip8Audio;
 use bevy::{
     audio::AddAudioSource,
     color::palettes::css,
-    diagnostic::{Diagnostic, DiagnosticPath, DiagnosticsStore, FrameTimeDiagnosticsPlugin, RegisterDiagnostic},
+    diagnostic::{
+        Diagnostic, DiagnosticPath, DiagnosticsStore, FrameTimeDiagnosticsPlugin,
+        RegisterDiagnostic,
+    },
     input::{keyboard::KeyboardInput, ButtonState},
     prelude::*,
     render::{
@@ -75,7 +78,7 @@ impl Default for UiData {
             paused: false,
             frame_rate: model::CosmacVip.default_framerate(),
             use_default_framerate: true,
-            cycles_per_frame: 100,
+            cycles_per_frame: 1000,
             actual_fps: 0.0,
             machine_model: DynamicModel::CosmacVip,
             rom_name: None,
@@ -199,16 +202,13 @@ fn setup_system(
         frame_handle: handle,
         frame_sprite: sprite,
     });
-    let beeper = Chip8Audio::new(Default::default());
+    let beeper = Chip8Audio::new();
     let beeper_handle = beeper_assets.add(beeper.clone());
     commands.spawn(AudioPlayer(beeper_handle));
     commands.insert_resource(beeper);
 }
 
-fn update_ui_data(
-    mut ui_data: ResMut<UiData>,
-    diagnostics: Res<DiagnosticsStore>,
-) {
+fn update_ui_data(mut ui_data: ResMut<UiData>, diagnostics: Res<DiagnosticsStore>) {
     if let Some(fps) = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|fps| fps.smoothed())
@@ -428,15 +428,25 @@ fn machine_audio(
     ui_data: Res<UiData>,
     mut audio: ResMut<Chip8Audio>,
 ) {
-    audio.edit(|audio| {
-        if let Some(machine) = machine.as_ref() {
-            audio.set_active(machine.machine.sound_active() && !ui_data.paused);
-            audio.set_pitch(machine.machine.pitch());
-            audio.set_pattern(*machine.machine.audio_pattern());
-        } else {
-            *audio = Default::default();
+    // audio.edit(|audio| {
+    //     if let Some(machine) = machine.as_ref() {
+    //         audio.set_active(machine.machine.sound_active() && !ui_data.paused);
+    //         audio.set_pitch(machine.machine.pitch());
+    //         audio.set_pattern(*machine.machine.audio_pattern());
+    //     } else {
+    //         *audio = Default::default();
+    //     }
+    // });
+    if let Some(machine) = machine
+            .as_ref()
+            .filter(|machine| machine.machine.sound_active() && !ui_data.paused)
+        {
+            audio.render_audio(
+                machine.machine.pitch(),
+                *machine.machine.audio_pattern(),
+                1.0 / ui_data.frame_rate,
+            );
         }
-    });
 }
 
 fn write_frame(texture: &mut Image, frame: RgbaImage) {

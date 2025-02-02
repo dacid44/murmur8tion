@@ -39,7 +39,7 @@ impl Decodable for Chip8Audio {
             Duration::from_secs_f64(1.0 / 1000.0),
             move |stream| {
                 let beeper = beeper.lock().unwrap();
-                stream.set_active(beeper.active);
+                stream.set_from(&beeper);
             },
         ))
     }
@@ -64,6 +64,12 @@ impl Chip8Source {
             pattern: u128::from_be_bytes(pattern_buffer),
             counter: 0.0,
         }
+    }
+
+    pub fn set_from(&mut self, other: &Self) {
+        self.set_active(other.active);
+        self.rate = other.rate;
+        self.pattern = other.pattern;
     }
 
     pub fn set_active(&mut self, active: bool) {

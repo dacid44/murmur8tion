@@ -4,7 +4,7 @@ use audio::Chip8Audio;
 use bevy::{
     audio::AddAudioSource,
     color::palettes::css,
-    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
+    diagnostic::{Diagnostic, DiagnosticPath, DiagnosticsStore, FrameTimeDiagnosticsPlugin, RegisterDiagnostic},
     input::{keyboard::KeyboardInput, ButtonState},
     prelude::*,
     render::{
@@ -128,6 +128,8 @@ impl Default for KeyMapping {
     }
 }
 
+const EMULATOR_TICK_RATE: DiagnosticPath = DiagnosticPath::const_new("emulator_tick_rate");
+
 fn main() {
     println!("Hello, world!");
 
@@ -150,6 +152,7 @@ fn main() {
         .add_plugins(EguiPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_event::<UiEvent>()
+        .register_diagnostic(Diagnostic::new(EMULATOR_TICK_RATE))
         .add_systems(Startup, setup_system)
         .add_systems(PreUpdate, update_ui_data)
         .add_systems(
@@ -265,7 +268,7 @@ fn emulator_ui_system(
             };
 
             ui.add(
-                egui::Slider::new(&mut ui_data.cycles_per_frame, 1..=1000)
+                egui::Slider::new(&mut ui_data.cycles_per_frame, 1..=1000000)
                     .logarithmic(true)
                     .text("Cycles per frame"),
             );

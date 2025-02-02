@@ -74,9 +74,9 @@ impl Screen for LegacySuperChipScreen {
         }
     }
 
-    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8> {
+    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[[u8; 32]]) -> Result<u8> {
         let collided = if self.hires {
-            sprite
+            sprite[0]
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
@@ -89,10 +89,7 @@ impl Screen for LegacySuperChipScreen {
     }
 
     fn scroll_down(&mut self, amount: u4) -> Result<()> {
-        let mut amount = u8::from(amount) as usize;
-        // if !self.hires {
-        //     amount &= 0xFE;
-        // }
+        let amount = u8::from(amount) as usize;
         if amount > 0 {
             self.data
                 .copy_within(..Self::HEIGHT as usize - amount, amount);
@@ -185,9 +182,9 @@ impl Screen for ModernSuperChipScreen {
         }
     }
 
-    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8> {
+    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[[u8; 32]]) -> Result<u8> {
         let collided = if self.hires {
-            sprite
+            sprite[0]
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .zip(self.data[(y % Self::HEIGHT) as usize..].iter_mut())
@@ -195,7 +192,7 @@ impl Screen for ModernSuperChipScreen {
                 .fold(false, BitOr::bitor)
         } else {
             let x = (x << 1) % Self::WIDTH;
-            sprite
+            sprite[0]
                 .chunks_exact(2)
                 .map(|line| u16::from_be_bytes([line[0], line[1]]))
                 .map(double_bits_magic)

@@ -21,6 +21,7 @@ impl XoChipScreen {
         self.data
             .iter_mut()
             .zip(self.enabled_planes)
+            .rev()
             .filter_map(|(plane, enabled)| enabled.then_some(plane))
     }
 }
@@ -70,11 +71,28 @@ impl Screen for XoChipScreen {
         Ok(())
     }
 
+    fn num_active_planes(&self) -> usize {
+        self.enabled_planes
+            .iter()
+            .map(|plane| *plane as usize)
+            .sum()
+    }
+
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
+        // println!(
+        //     "draw small sprite {x} {y} {}",
+        //     sprite
+        //         .iter()
+        //         .map(|line| format!("{line:08b}"))
+        //         .collect::<Vec<_>>()
+        //         .join(" ")
+        // );
         let hires = self.hires;
+        let sprite_size = sprite.len() / self.num_active_planes();
         if hires {
             self.iter_enabled_planes()
-                .flat_map(|plane| {
+                .zip(sprite.chunks(sprite_size))
+                .flat_map(|(plane, sprite)| {
                     sprite
                         .iter()
                         .zip(iter_plane_wrapping(plane, y % Self::HEIGHT))
@@ -84,7 +102,8 @@ impl Screen for XoChipScreen {
         } else {
             let x = (x << 1) % Self::WIDTH;
             self.iter_enabled_planes()
-                .flat_map(|plane| {
+                .zip(sprite.chunks(sprite_size))
+                .flat_map(|(plane, sprite)| {
                     sprite
                         .iter()
                         .copied()
@@ -99,10 +118,11 @@ impl Screen for XoChipScreen {
         }
     }
 
-    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8> {
+    fn draw_large_sprite(&mut self, x: u8, y: u8, sprite: &[[u8; 32]]) -> Result<u8> {
         let collided = if self.hires {
             self.iter_enabled_planes()
-                .flat_map(|plane| {
+                .zip(sprite.iter())
+                .flat_map(|(plane, sprite)| {
                     sprite
                         .chunks_exact(2)
                         .map(|line| u16::from_be_bytes([line[0], line[1]]))
@@ -113,7 +133,8 @@ impl Screen for XoChipScreen {
         } else {
             let x = (x << 1) % Self::WIDTH;
             self.iter_enabled_planes()
-                .flat_map(|plane| {
+                .zip(sprite.iter())
+                .flat_map(|(plane, sprite)| {
                     sprite
                         .chunks_exact(2)
                         .map(|line| u16::from_be_bytes([line[0], line[1]]))

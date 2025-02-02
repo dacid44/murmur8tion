@@ -488,9 +488,11 @@ impl<Model: model::Model> Chip8<Model> {
                 } else {
                     let x_val = self.cpu.get_v(x);
                     let y_val = self.cpu.get_v(y);
-                    let mut data = [0; 16];
-                    let slice = &mut data[..u8::from(n) as usize];
-                    slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + u16::from(n))?);
+                    let mut data = [0; 64];
+                    let slice = &mut data[..u8::from(n) as usize * self.screen.num_active_planes()];
+                    slice.copy_from_slice(
+                        self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
+                    );
                     self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
                 }
             }
@@ -519,19 +521,24 @@ impl<Model: model::Model> Chip8<Model> {
                                 if self.model.quirks().lores_draw_large_as_small
                                     && !self.screen.get_hires()
                                 {
-                                    let mut data = [0; 16];
-                                    data.copy_from_slice(
-                                        self.mem_slice(self.cpu.i..self.cpu.i + 16)?,
-                                    );
+                                    let mut data = [0; 64];
+                                    let slice = &mut data[..16 * self.screen.num_active_planes()];
+                                    slice.copy_from_slice(self.mem_slice(
+                                        self.cpu.i as usize..self.cpu.i as usize + slice.len(),
+                                    )?);
                                     self.cpu.v[0xF] =
-                                        self.screen.draw_sprite(x_val, y_val, &data) as u8;
+                                        self.screen.draw_sprite(x_val, y_val, slice) as u8;
                                 } else {
-                                    let mut data = [0; 32];
-                                    data.copy_from_slice(
-                                        self.mem_slice(self.cpu.i..self.cpu.i + 32)?,
-                                    );
-                                    self.cpu.v[0xF] =
-                                        self.screen.draw_large_sprite(x_val, y_val, &data)?;
+                                    let mut data = [0; 128];
+                                    let slice = &mut data[..32 * self.screen.num_active_planes()];
+                                    slice.copy_from_slice(self.mem_slice(
+                                        self.cpu.i as usize..self.cpu.i as usize + slice.len(),
+                                    )?);
+                                    self.cpu.v[0xF] = self.screen.draw_large_sprite(
+                                        x_val,
+                                        y_val,
+                                        bytemuck::cast_slice(slice),
+                                    )?;
                                 }
                             }
                         }

@@ -94,8 +94,11 @@ pub trait Screen {
     fn set_planes(&mut self, _planes: u4) -> Result<()> {
         Err(UnsupportedScreenOperation::SetPlanes)
     }
+    fn num_active_planes(&self) -> usize {
+        1
+    }
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool;
-    fn draw_large_sprite(&mut self, _x: u8, _y: u8, _sprite: &[u8; 32]) -> Result<u8> {
+    fn draw_large_sprite(&mut self, _x: u8, _y: u8, _sprite: &[[u8; 32]]) -> Result<u8> {
         Err(UnsupportedScreenOperation::LargeSprite)
     }
     fn scroll_down(&mut self, _amount: u4) -> Result<()> {
@@ -140,8 +143,9 @@ impl Screen for DynamicScreen {
     screen_method!(get_hires(self: &Self) -> bool);
     screen_method!(set_hires(self: &mut Self, hires: bool) -> Result<()>);
     screen_method!(set_planes(self: &mut Self, planes: u4) -> Result<()>);
+    screen_method!(num_active_planes(self: &Self) -> usize);
     screen_method!(draw_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8]) -> bool);
-    screen_method!(draw_large_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8; 32]) -> Result<u8>);
+    screen_method!(draw_large_sprite(self: &mut Self, x: u8, y: u8, sprite: &[[u8; 32]]) -> Result<u8>);
     screen_method!(scroll_down(self: &mut Self, amount: u4) -> Result<()>);
     screen_method!(scroll_up(self: &mut Self, amount: u4) -> Result<()>);
     screen_method!(scroll_right(self: &mut Self) -> Result<()>);

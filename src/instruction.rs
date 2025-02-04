@@ -1,4 +1,4 @@
-use arbitrary_int::{u12, u2, u4};
+use arbitrary_int::{u12, u4};
 use bitbybit::bitfield;
 
 macro_rules! match_ux {

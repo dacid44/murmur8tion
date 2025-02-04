@@ -9,10 +9,10 @@ use std::{
     ops::{BitAnd, BitXorAssign, Shl, ShlAssign, Shr},
 };
 
+use arbitrary_int::u4;
 use image::{Rgba, RgbaImage};
 use num_traits::PrimInt;
 use thiserror::Error;
-use arbitrary_int::u4;
 
 pub use cosmac_vip::CosmacVipScreen;
 pub use schip::{LegacySuperChipScreen, ModernSuperChipScreen};

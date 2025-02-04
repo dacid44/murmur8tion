@@ -1,19 +1,13 @@
-use std::{fmt::Display, ops::DerefMut};
+use std::fmt::Display;
 
 use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::{
     egui::{self, Ui},
-    EguiContext, EguiContexts,
+    EguiContext,
 };
-use egui_tiles::{
-    Container, Linear, LinearDir, SimplificationOptions, Tabs, Tile, TileId, Tiles, Tree,
-};
+use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 
-use super::{
-    debug::{bevy_inspector_ui, DebugOptions},
-    ui::draw_main_ui,
-    EmulatorData, EmulatorEvent,
-};
+use super::{debug::bevy_inspector_ui, ui::draw_main_ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EmulatorTab {
@@ -43,7 +37,7 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
     fn pane_ui(
         &mut self,
         ui: &mut Ui,
-        tile_id: egui_tiles::TileId,
+        _tile_id: egui_tiles::TileId,
         pane: &mut EmulatorTab,
     ) -> egui_tiles::UiResponse {
         let background_color = match pane {

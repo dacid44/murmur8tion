@@ -7,7 +7,6 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use bevy_egui::EguiContexts;
 
 use crate::{
     model::{self, DynamicModel, Model},
@@ -26,7 +25,6 @@ struct Frame {
     handle: Handle<Image>,
     size: UVec2,
 }
-
 
 #[derive(Resource)]
 struct EmulatorData {

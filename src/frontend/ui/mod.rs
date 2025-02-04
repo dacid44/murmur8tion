@@ -1,7 +1,4 @@
-use bevy::{
-    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
-    prelude::*,
-};
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 use bevy_egui::{
     egui::{self, Ui},
     EguiPlugin,
@@ -23,7 +20,7 @@ pub fn ui_plugin(app: &mut App) {
 }
 
 pub fn draw_main_ui(
-    mut ui: InMut<Ui>,
+    ui: InMut<Ui>,
     // diagnostics: Res<DiagnosticsStore>,
     mut emulator_data: ResMut<EmulatorData>,
     mut events: EventWriter<EmulatorEvent>,

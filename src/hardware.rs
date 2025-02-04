@@ -1,9 +1,9 @@
-use std::ops::{Bound, RangeBounds, Sub};
+use std::ops::{Bound, RangeBounds};
 
+use arbitrary_int::{u4, Number};
 use bevy::log::warn;
 use rand::Rng;
 use thiserror::Error;
-use arbitrary_int::{u4, Number};
 
 use crate::{
     frontend::audio::DEFAULT_PATTERN,
@@ -304,15 +304,15 @@ impl<Model: model::Model> Chip8<Model> {
         &self.audio_pattern
     }
 
-    fn mem_slice<R: IntoUsizeRange<I>, I>(&self, range: R) -> Result<&[u8]> {
-        let range = range.into_usize_range();
+    fn mem_slice(&self, range: impl RangeBounds<usize>) -> Result<&[u8]> {
+        let range = (range.start_bound().cloned(), range.end_bound().cloned());
         self.memory
             .get(range)
             .ok_or(Error::InvalidMemoryRange(range, self.memory.len()))
     }
 
-    fn mem_slice_mut<R: IntoUsizeRange<I>, I>(&mut self, range: R) -> Result<&mut [u8]> {
-        let range = range.into_usize_range();
+    fn mem_slice_mut(&mut self, range: impl RangeBounds<usize>) -> Result<&mut [u8]> {
+        let range = (range.start_bound().cloned(), range.end_bound().cloned());
         let memory_len = self.memory.len();
         self.memory
             .get_mut(range)
@@ -408,14 +408,14 @@ impl<Model: model::Model> Chip8<Model> {
             }
             I::LdB { x } => {
                 let digits = bcd(self.cpu.get_v(x));
-                self.mem_slice_mut(self.cpu.i..=self.cpu.i + 2)?
+                self.mem_slice_mut(self.cpu.i as usize..=self.cpu.i as usize + 2)?
                     .copy_from_slice(&digits);
             }
             I::LdToSlice { x } => {
                 let mut data = [0; 16];
                 let slice = &mut data[..=u8::from(x) as usize];
                 slice.copy_from_slice(&self.cpu.v[..slice.len()]);
-                self.mem_slice_mut(self.cpu.i..self.cpu.i + slice.len() as u16)?
+                self.mem_slice_mut(self.cpu.i as usize..self.cpu.i as usize + slice.len())?
                     .copy_from_slice(slice);
                 if self.model.quirks().inc_i_on_slice {
                     self.cpu.i += slice.len() as u16;
@@ -424,7 +424,9 @@ impl<Model: model::Model> Chip8<Model> {
             I::LdFromSlice { x } => {
                 let mut data = [0; 16];
                 let slice = &mut data[..=u8::from(x) as usize];
-                slice.copy_from_slice(self.mem_slice(self.cpu.i..self.cpu.i + slice.len() as u16)?);
+                slice.copy_from_slice(
+                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
+                );
                 self.cpu.v[..slice.len()].copy_from_slice(slice);
                 if self.model.quirks().inc_i_on_slice {
                     self.cpu.i += slice.len() as u16;
@@ -632,37 +634,4 @@ impl<Model: model::Model> Chip8<Model> {
 
 fn bcd(x: u8) -> [u8; 3] {
     [x / 100, x / 10 % 10, x % 10]
-}
-
-trait IntoUsizeRange<I> {
-    fn into_usize_range(&self) -> (Bound<usize>, Bound<usize>);
-}
-
-impl<R, I> IntoUsizeRange<I> for R
-where
-    R: RangeBounds<I>,
-    I: Copy + Into<usize>,
-{
-    fn into_usize_range(&self) -> (Bound<usize>, Bound<usize>) {
-        (
-            convert_bound(self.start_bound()),
-            convert_bound(self.end_bound()),
-        )
-    }
-}
-
-fn convert_bound<I: Copy + Into<usize>>(bound: Bound<&I>) -> Bound<usize> {
-    match bound {
-        Bound::Included(bound) => Bound::Included((*bound).into()),
-        Bound::Excluded(bound) => Bound::Excluded((*bound).into()),
-        Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
-fn abs_diff<N: PartialOrd + Sub<Output = N>>(a: N, b: N) -> N {
-    if a > b {
-        a - b
-    } else {
-        b - a
-    }
 }

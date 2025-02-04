@@ -1,7 +1,7 @@
 use std::ops::BitOr;
 
-use image::RgbaImage;
 use arbitrary_int::u4;
+use image::RgbaImage;
 
 use super::{
     combine_planes, double_bits_holger, double_bits_magic, draw_line, Palette, Result, Screen,

@@ -18,7 +18,7 @@ fn main() {
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "CHIP-8 Emulator".to_owned(),
+                        title: "Murmur8tion".to_owned(),
                         ..Default::default()
                     }),
                     ..Default::default()

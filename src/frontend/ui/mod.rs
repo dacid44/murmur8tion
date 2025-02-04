@@ -1,7 +1,7 @@
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 use bevy_egui::{
-    egui::{self, Ui},
-    EguiPlugin,
+    egui::{self, style::HandleShape, Ui},
+    EguiContexts, EguiPlugin,
 };
 use widgets::{model_selector, palette_editor};
 
@@ -12,12 +12,14 @@ use super::{
     EmulatorData, EmulatorEvent,
 };
 
+pub mod style;
 mod widgets;
 
 pub fn ui_plugin(app: &mut App) {
-    app.add_plugins(EguiPlugin)
-        .add_plugins(FrameTimeDiagnosticsPlugin);
+    app.add_plugins(FrameTimeDiagnosticsPlugin)
+        .add_systems(Startup, style::apply_style);
 }
+
 
 pub fn draw_main_ui(
     ui: InMut<Ui>,

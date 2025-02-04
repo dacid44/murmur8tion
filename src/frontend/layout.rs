@@ -2,12 +2,15 @@ use std::fmt::Display;
 
 use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_egui::{
-    egui::{self, Ui},
-    EguiContext,
+    egui::{self, Color32, Ui},
+    EguiContext, EguiPlugin,
 };
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 
-use super::{debug::bevy_inspector_ui, ui::draw_main_ui};
+use super::{
+    debug::bevy_inspector_ui,
+    ui::{draw_main_ui, style},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EmulatorTab {
@@ -90,6 +93,42 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
         }
     }
 
+    fn tab_bar_color(&self, _visuals: &egui::Visuals) -> egui::Color32 {
+        style::BACKGROUND_NEUTRAL
+    }
+
+    fn tab_bg_color(
+        &self,
+        visuals: &egui::Visuals,
+        tiles: &Tiles<EmulatorTab>,
+        tile_id: TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Color32 {
+        if state.active {
+            if tiles.get_pane(&tile_id) == Some(&EmulatorTab::Display) {
+                style::BACKGROUND_DARK
+            } else {
+                visuals.panel_fill
+            }
+        } else {
+            Color32::TRANSPARENT
+        }
+    }
+
+    // fn tab_text_color(
+    //     &self,
+    //     _visuals: &egui::Visuals,
+    //     _tiles: &Tiles<EmulatorTab>,
+    //     _tile_id: TileId,
+    //     state: &egui_tiles::TabState,
+    // ) -> egui::Color32 {
+    //     match (state.is_being_dragged, state.active) {
+    //         (true, _) => style::ACCENT_DARK,
+    //         (false, true) => style::FOREGROUND_LIGHT,
+    //         (false, false) => style::ACCENT_DARK,
+    //     }
+    // }
+
     fn top_bar_right_ui(
         &mut self,
         _tiles: &Tiles<EmulatorTab>,
@@ -139,7 +178,8 @@ struct Layout {
 pub struct ScaleToDisplay(pub Vec2);
 
 pub fn layout_plugin(app: &mut App) {
-    app.init_resource::<DisplayRect>()
+    app.add_plugins(EguiPlugin)
+        .init_resource::<DisplayRect>()
         .add_systems(Startup, setup)
         .add_systems(Update, draw_ui)
         .add_systems(PostUpdate, scale_display);

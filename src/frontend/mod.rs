@@ -7,6 +7,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
+use ui::style;
 
 use crate::{
     model::{self, DynamicModel, Model},
@@ -91,7 +92,7 @@ fn setup(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        &(css::BEIGE.to_u8_array()),
+        &style::FOREGROUND_LIGHT.to_array(),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );

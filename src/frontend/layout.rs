@@ -211,7 +211,7 @@ pub fn layout_plugin(app: &mut App) {
         .init_resource::<DisplayRect>()
         .add_systems(Startup, setup)
         .add_systems(Update, draw_ui)
-        .add_systems(PostUpdate, scale_display);
+        .add_systems(PostUpdate, scale_display.run_if(any_with_component::<PrimaryWindow>));
 }
 
 fn setup(mut commands: Commands) {

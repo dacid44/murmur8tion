@@ -1,7 +1,13 @@
-use bevy_egui::egui::{self, Align, Color32, Response, Ui};
+use std::fmt::Display;
+
+use bevy_egui::egui::{self, reset_button_with, Align, Color32, Response, Ui};
 use image::Rgba;
 
-use crate::{model::DynamicModel, screen::Palette};
+use crate::{
+    hardware::KeyEvent,
+    model::{DrawWaitSetting, DynamicModel, Quirks},
+    screen::Palette,
+};
 
 pub fn model_selector(ui: &mut Ui, model: &mut DynamicModel) -> egui::Response {
     egui::ComboBox::from_label("Machine type")
@@ -9,23 +15,23 @@ pub fn model_selector(ui: &mut Ui, model: &mut DynamicModel) -> egui::Response {
         .show_ui(ui, |ui| {
             ui.selectable_value(
                 model,
-                DynamicModel::CosmacVip,
-                DynamicModel::CosmacVip.to_string(),
+                DynamicModel::COSMAC_VIP,
+                DynamicModel::COSMAC_VIP.to_string(),
             );
             ui.selectable_value(
                 model,
-                DynamicModel::LegacySuperChip,
-                DynamicModel::LegacySuperChip.to_string(),
+                DynamicModel::LEGACY_SCHIP,
+                DynamicModel::LEGACY_SCHIP.to_string(),
             );
             ui.selectable_value(
                 model,
-                DynamicModel::ModernSuperChip,
-                DynamicModel::ModernSuperChip.to_string(),
+                DynamicModel::MODERN_SCHIP,
+                DynamicModel::MODERN_SCHIP.to_string(),
             );
             ui.selectable_value(
                 model,
-                DynamicModel::XoChip,
-                DynamicModel::XoChip.to_string(),
+                DynamicModel::XO_CHIP,
+                DynamicModel::XO_CHIP.to_string(),
             );
         })
         .response
@@ -67,4 +73,102 @@ pub fn color_edit_button(ui: &mut Ui, color: &mut Rgba<u8>) -> Response {
         *color = Rgba::from(egui_color.to_array());
     }
     response
+}
+
+pub fn edit_quirks(
+    ui: &mut Ui,
+    quirks: &mut Quirks,
+    default: Quirks,
+) -> egui::CollapsingResponse<()> {
+    let boolean_options = [
+        (
+            &mut quirks.graceful_exit_on_0000,
+            default.graceful_exit_on_0000,
+            "Exit gracefully on opcode 0x0000.",
+        ),
+        (
+            &mut quirks.bitshift_use_y,
+            default.bitshift_use_y,
+            "Bitshift operations read from vY instead of vX.",
+        ),
+        (
+            &mut quirks.inc_i_on_slice,
+            default.inc_i_on_slice,
+            "Increment I by X+1 on bulk load/store.",
+        ),
+        (
+            &mut quirks.bitwise_reset_flag,
+            default.bitwise_reset_flag,
+            "Bitwise instructions (8xy1 OR/8xy2 AND/8xy3 XOR) reset vF.",
+        ),
+        (
+            &mut quirks.clear_screen_on_mode_switch,
+            default.clear_screen_on_mode_switch,
+            "Clear the screen when switching between hires and lores modes.",
+        ),
+        (
+            &mut quirks.jump_v0_use_vx,
+            default.jump_v0_use_vx,
+            "Bnnn (jump to NNN+v0) instead becomes Bxnn (jump to NNN+vX).",
+        ),
+        (
+            &mut quirks.lores_draw_large_as_small,
+            default.lores_draw_large_as_small,
+            "In lores mode, Dxy0 (draw 16x16 sprite) instead draws a small sprite with height 16.",
+        ),
+    ];
+    egui::CollapsingHeader::new("Edit Quirks").show(ui, |ui| {
+        for (value, default_value, text) in boolean_options {
+            draw_quirk_config_option(ui, value, default_value, text, Ui::checkbox);
+        }
+        draw_quirk_config_option(
+            ui,
+            &mut quirks.key_wait_trigger,
+            default.key_wait_trigger,
+            "Which key event triggers Fx0A (wait for key)?",
+            |ui, value, text| {
+                ui.selectable_value(value, KeyEvent::Press, KeyEvent::Press.to_string());
+                ui.selectable_value(value, KeyEvent::Release, KeyEvent::Release.to_string());
+                ui.label(text);
+            },
+        );
+        draw_quirk_config_option(
+            ui,
+            &mut quirks.draw_wait_for_vblank,
+            default.draw_wait_for_vblank,
+            "Dxyn and Dxy0 (draw sprite) wait for vblank (end of the frame) to draw.",
+            |ui, value, text| {
+                ui.selectable_value(
+                    value,
+                    DrawWaitSetting::Always,
+                    DrawWaitSetting::Always.to_string(),
+                );
+                ui.selectable_value(
+                    value,
+                    DrawWaitSetting::LoresOnly,
+                    DrawWaitSetting::LoresOnly.to_string(),
+                );
+                ui.selectable_value(
+                    value,
+                    DrawWaitSetting::Never,
+                    DrawWaitSetting::Never.to_string(),
+                );
+                ui.label(text);
+            },
+        );
+    })
+}
+
+fn draw_quirk_config_option<T: Display + PartialEq, R>(
+    ui: &mut Ui,
+    value: &mut T,
+    default_value: T,
+    text: &str,
+    render: impl FnOnce(&mut Ui, &mut T, String) -> R,
+) -> egui::InnerResponse<R> {
+    let label = format!("{} Default: {}", text, default_value);
+    ui.horizontal(|ui| {
+        reset_button_with(ui, value, "⟲", default_value);
+        render(ui, value, label)
+    })
 }

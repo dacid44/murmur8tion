@@ -25,7 +25,7 @@ pub trait Model {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quirks {
     pub graceful_exit_on_0000: bool,
     pub bitshift_use_y: bool,
@@ -51,6 +51,16 @@ pub enum DrawWaitSetting {
     Never,
 }
 
+impl Display for DrawWaitSetting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DrawWaitSetting::Always => write!(f, "Always"),
+            DrawWaitSetting::LoresOnly => write!(f, "Lores mode only"),
+            DrawWaitSetting::Never => write!(f, "Never"),
+        }
+    }
+}
+
 impl DrawWaitSetting {
     pub fn wait(&self, hires: bool) -> bool {
         match self {
@@ -65,10 +75,10 @@ macro_rules! dynamic_model_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
-                Self::CosmacVip => CosmacVip.$name($($param), *),
-                Self::LegacySuperChip => LegacySuperChip.$name($($param), *),
-                Self::ModernSuperChip => ModernSuperChip.$name($($param), *),
-                Self::XoChip => XoChip.$name($($param), *),
+                Self::CosmacVip(model) => Model::$name(model$(, $param)*),
+                Self::LegacySuperChip(model) => Model::$name(model$(, $param)*),
+                Self::ModernSuperChip(model) => Model::$name(model$(, $param)*),
+                Self::XoChip(model) => Model::$name(model$(, $param)*),
             }
         }
     }
@@ -76,19 +86,25 @@ macro_rules! dynamic_model_method {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DynamicModel {
-    CosmacVip,
-    LegacySuperChip,
-    ModernSuperChip,
-    XoChip,
+    CosmacVip(CosmacVip),
+    LegacySuperChip(LegacySuperChip),
+    ModernSuperChip(ModernSuperChip),
+    XoChip(XoChip),
+}
+
+impl Default for DynamicModel {
+    fn default() -> Self {
+        Self::CosmacVip(CosmacVip::default())
+    }
 }
 
 impl Display for DynamicModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CosmacVip => write!(f, "COSMAC VIP"),
-            Self::LegacySuperChip => write!(f, "Legacy SUPER-CHIP (SUPER-CHIP 1.1)"),
-            Self::ModernSuperChip => write!(f, "Modern SUPER-CHIP (Octo)"),
-            Self::XoChip => write!(f, "XO-CHIP"),
+            Self::CosmacVip(_) => write!(f, "COSMAC VIP"),
+            Self::LegacySuperChip(_) => write!(f, "Legacy SUPER-CHIP (SUPER-CHIP 1.1)"),
+            Self::ModernSuperChip(_) => write!(f, "Modern SUPER-CHIP (Octo)"),
+            Self::XoChip(_) => write!(f, "XO-CHIP"),
         }
     }
 }
@@ -99,10 +115,10 @@ impl Model for DynamicModel {
 
     fn init_screen(&self) -> Self::Screen {
         match self {
-            Self::CosmacVip => DynamicScreen::CosmacVip(Default::default()),
-            Self::LegacySuperChip => DynamicScreen::LegacySuperChip(Default::default()),
-            Self::ModernSuperChip => DynamicScreen::ModernSuperChip(Default::default()),
-            Self::XoChip => DynamicScreen::XoChip(Default::default()),
+            Self::CosmacVip(_) => DynamicScreen::CosmacVip(Default::default()),
+            Self::LegacySuperChip(_) => DynamicScreen::LegacySuperChip(Default::default()),
+            Self::ModernSuperChip(_) => DynamicScreen::ModernSuperChip(Default::default()),
+            Self::XoChip(_) => DynamicScreen::XoChip(Default::default()),
         }
     }
 
@@ -116,8 +132,33 @@ impl Model for DynamicModel {
     dynamic_model_method!(default_framerate(self: &Self) -> f64);
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CosmacVip;
+impl DynamicModel {
+    pub const COSMAC_VIP: Self = Self::CosmacVip(CosmacVip(CosmacVip::QUIRKS));
+    pub const LEGACY_SCHIP: Self = Self::LegacySuperChip(LegacySuperChip(LegacySuperChip::QUIRKS));
+    pub const MODERN_SCHIP: Self = Self::ModernSuperChip(ModernSuperChip(ModernSuperChip::QUIRKS));
+    pub const XO_CHIP: Self = Self::XoChip(XoChip(XoChip::QUIRKS));
+
+    pub fn quirks_mut(&mut self) -> &mut Quirks {
+        match self {
+            Self::CosmacVip(CosmacVip(quirks)) => quirks,
+            Self::LegacySuperChip(LegacySuperChip(quirks)) => quirks,
+            Self::ModernSuperChip(ModernSuperChip(quirks)) => quirks,
+            Self::XoChip(XoChip(quirks)) => quirks,
+        }
+    }
+
+    pub fn default_quirks(&self) -> Quirks {
+        match self {
+            Self::CosmacVip(_) => CosmacVip::QUIRKS,
+            Self::LegacySuperChip(_) => LegacySuperChip::QUIRKS,
+            Self::ModernSuperChip(_) => ModernSuperChip::QUIRKS,
+            Self::XoChip(_) => XoChip::QUIRKS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CosmacVip(pub Quirks);
 
 impl CosmacVip {
     const QUIRKS: Quirks = Quirks {
@@ -131,6 +172,12 @@ impl CosmacVip {
         jump_v0_use_vx: false,
         lores_draw_large_as_small: true,
     };
+}
+
+impl Default for CosmacVip {
+    fn default() -> Self {
+        Self(Self::QUIRKS)
+    }
 }
 
 impl Model for CosmacVip {
@@ -150,12 +197,12 @@ impl Model for CosmacVip {
     }
 
     fn quirks(&self) -> &Quirks {
-        &Self::QUIRKS
+        &self.0
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct LegacySuperChip;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacySuperChip(pub Quirks);
 
 impl LegacySuperChip {
     const QUIRKS: Quirks = Quirks {
@@ -169,6 +216,12 @@ impl LegacySuperChip {
         jump_v0_use_vx: true,
         lores_draw_large_as_small: true,
     };
+}
+
+impl Default for LegacySuperChip {
+    fn default() -> Self {
+        Self(Self::QUIRKS)
+    }
 }
 
 impl Model for LegacySuperChip {
@@ -188,7 +241,7 @@ impl Model for LegacySuperChip {
     }
 
     fn quirks(&self) -> &Quirks {
-        &Self::QUIRKS
+        &self.0
     }
 
     fn default_framerate(&self) -> f64 {
@@ -196,8 +249,8 @@ impl Model for LegacySuperChip {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ModernSuperChip;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModernSuperChip(pub Quirks);
 
 impl ModernSuperChip {
     const QUIRKS: Quirks = Quirks {
@@ -211,6 +264,12 @@ impl ModernSuperChip {
         jump_v0_use_vx: true,
         lores_draw_large_as_small: false,
     };
+}
+
+impl Default for ModernSuperChip {
+    fn default() -> Self {
+        Self(Self::QUIRKS)
+    }
 }
 
 impl Model for ModernSuperChip {
@@ -230,12 +289,12 @@ impl Model for ModernSuperChip {
     }
 
     fn quirks(&self) -> &Quirks {
-        &Self::QUIRKS
+        &self.0
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct XoChip;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct XoChip(pub Quirks);
 
 impl XoChip {
     const QUIRKS: Quirks = Quirks {
@@ -249,6 +308,12 @@ impl XoChip {
         jump_v0_use_vx: false,
         lores_draw_large_as_small: false,
     };
+}
+
+impl Default for XoChip {
+    fn default() -> Self {
+        Self(Self::QUIRKS)
+    }
 }
 
 impl Model for XoChip {
@@ -272,6 +337,6 @@ impl Model for XoChip {
     }
 
     fn quirks(&self) -> &Quirks {
-        &Self::QUIRKS
+        &self.0
     }
 }

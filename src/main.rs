@@ -12,7 +12,9 @@ fn main() {
 
     App::new()
         .insert_resource(WinitSettings::game())
-        .insert_resource(Time::<Fixed>::from_hz(model::CosmacVip.default_framerate()))
+        .insert_resource(Time::<Fixed>::from_hz(
+            model::DynamicModel::default().default_framerate(),
+        ))
         .add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())

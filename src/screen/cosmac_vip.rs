@@ -1,5 +1,6 @@
 use std::ops::BitOr;
 
+use bevy::log::info_span;
 use image::RgbaImage;
 
 use super::{draw_line_clipping, screen_to_image, Palette, Screen};
@@ -26,6 +27,7 @@ impl Screen for CosmacVipScreen {
     }
 
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
+        // let span = info_span!("CosmacVipScreen::draw_sprite", name = "CosmacVipScreen::draw_sprite").entered();
         sprite
             .iter()
             .zip(self.0[(y % Self::HEIGHT) as usize..].iter_mut())

@@ -25,7 +25,7 @@ pub struct Machine {
 }
 
 impl Machine {
-    fn new(model: &DynamicModel, rom: &[u8]) -> Self {
+    fn new(model: DynamicModel, rom: &[u8]) -> Self {
         Self {
             machine: DynamicMachine::new(model, rom),
             queued_inputs: VecDeque::new(),
@@ -63,7 +63,7 @@ pub fn handle_ui_events(
                         ui_data.frame_rate = rate;
                         time.set_timestep_hz(rate);
                     }
-                    commands.insert_resource(Machine::new(&ui_data.machine_model, &rom.0))
+                    commands.insert_resource(Machine::new(ui_data.machine_model.clone(), &rom.0))
                 }
             }
             EmulatorEvent::ChangeTickRate(rate) => time.set_timestep_hz(*rate),

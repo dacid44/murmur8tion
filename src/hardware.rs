@@ -1,7 +1,10 @@
-use std::ops::{Bound, RangeBounds};
+use std::{
+    fmt::Display,
+    ops::{Bound, RangeBounds},
+};
 
 use arbitrary_int::{u4, Number};
-use bevy::log::warn;
+use bevy::log::{info_span, warn};
 use rand::Rng;
 use thiserror::Error;
 
@@ -53,29 +56,29 @@ pub enum DynamicMachine {
 }
 
 impl DynamicMachine {
-    pub fn new(model: &DynamicModel, rom: &[u8]) -> Self {
+    pub fn new(model: DynamicModel, rom: &[u8]) -> Self {
         match model {
-            DynamicModel::CosmacVip => Self::new_cosmac_vip(rom),
-            DynamicModel::LegacySuperChip => Self::new_legacy_schip(rom),
-            DynamicModel::ModernSuperChip => Self::new_modern_schip(rom),
-            DynamicModel::XoChip => Self::new_xochip(rom),
+            DynamicModel::CosmacVip(model) => Self::new_cosmac_vip(rom, model),
+            DynamicModel::LegacySuperChip(model) => Self::new_legacy_schip(rom, model),
+            DynamicModel::ModernSuperChip(model) => Self::new_modern_schip(rom, model),
+            DynamicModel::XoChip(model) => Self::new_xochip(rom, model),
         }
     }
 
-    pub fn new_cosmac_vip(rom: &[u8]) -> Self {
-        Self::CosmacVip(Chip8::new(CosmacVip, rom))
+    pub fn new_cosmac_vip(rom: &[u8], model: CosmacVip) -> Self {
+        Self::CosmacVip(Chip8::new(model, rom))
     }
 
-    pub fn new_legacy_schip(rom: &[u8]) -> Self {
-        Self::LegacySuperChip(Chip8::new(LegacySuperChip, rom))
+    pub fn new_legacy_schip(rom: &[u8], model: LegacySuperChip) -> Self {
+        Self::LegacySuperChip(Chip8::new(model, rom))
     }
 
-    pub fn new_modern_schip(rom: &[u8]) -> Self {
-        Self::ModernSuperChip(Chip8::new(ModernSuperChip, rom))
+    pub fn new_modern_schip(rom: &[u8], model: ModernSuperChip) -> Self {
+        Self::ModernSuperChip(Chip8::new(model, rom))
     }
 
-    pub fn new_xochip(rom: &[u8]) -> Self {
-        Self::XoChip(Chip8::new(XoChip, rom))
+    pub fn new_xochip(rom: &[u8], model: XoChip) -> Self {
+        Self::XoChip(Chip8::new(model, rom))
     }
 
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
@@ -192,6 +195,15 @@ struct Keypad {
 pub enum KeyEvent {
     Press,
     Release,
+}
+
+impl Display for KeyEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeyEvent::Press => write!(f, "Press"),
+            KeyEvent::Release => write!(f, "Release"),
+        }
+    }
 }
 
 impl Keypad {
@@ -352,6 +364,8 @@ impl<Model: model::Model> Chip8<Model> {
         use Instruction as I;
         use SuperChipInstruction as Sci;
         use XoChipInstruction as Xci;
+
+        // let span = info_span!("Chip8::tick", name = "Chip8::tick").entered();
 
         let raw_instruction = self.read_word()?;
         let instruction = Instruction::from_u16(raw_instruction, self.model.instruction_set())

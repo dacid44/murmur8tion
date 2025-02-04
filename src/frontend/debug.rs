@@ -1,8 +1,8 @@
-use std::{fmt::Display, ops::DerefMut};
+use std::fmt::Display;
 
 use bevy::{color::palettes::css, prelude::*, render::view::VisibilitySystems};
 use bevy_egui::{
-    egui::{self, scroll_area::ScrollBarVisibility, Ui},
+    egui::{self, Ui},
     EguiContexts,
 };
 use bevy_inspector_egui::bevy_inspector;
@@ -139,6 +139,13 @@ fn render_grid(
             css::RED,
         );
     }
+}
+
+struct MemoryState {
+    bytes_per_row: usize,
+    last_start: usize,
+    last_memory: Vec<u8>,
+    animation_countdowns: Vec<u8>,
 }
 
 pub fn memory_ui(ui: InMut<Ui>, machine: Option<Res<Machine>>, mut bytes_per_row: Local<usize>) {

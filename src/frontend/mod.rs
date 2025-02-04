@@ -2,7 +2,6 @@ use audio::Chip8Audio;
 use bevy::{
     asset::RenderAssetUsages,
     audio::AddAudioSource,
-    color::palettes::css,
     diagnostic::{Diagnostic, DiagnosticPath, RegisterDiagnostic},
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
@@ -42,10 +41,10 @@ impl Default for EmulatorData {
     fn default() -> Self {
         Self {
             paused: false,
-            frame_rate: model::CosmacVip.default_framerate(),
+            frame_rate: model::DynamicModel::default().default_framerate(),
             use_default_framerate: true,
             cycles_per_frame: 1000,
-            machine_model: DynamicModel::CosmacVip,
+            machine_model: Default::default(),
             rom_name: None,
             palette: Default::default(),
         }

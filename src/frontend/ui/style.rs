@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bevy::{ecs::system::ResMut, render::camera::ClearColor};
 use bevy_egui::{
-    egui::{self, epaint::text::FontInsert, style::HandleShape, Color32, FontData},
+    egui::{self, style::HandleShape, Color32},
     EguiContexts,
 };
 
@@ -82,7 +82,8 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
         widgets.noninteractive.bg_fill = BACKGROUND;
         widgets.noninteractive.weak_bg_fill = BACKGROUND;
         widgets.noninteractive.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_DARK);
-        widgets.noninteractive.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
+        widgets.noninteractive.fg_stroke =
+            egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
 
         widgets.inactive.bg_fill = FOREGROUND_DARK;
         widgets.inactive.weak_bg_fill = FOREGROUND_DARK;
@@ -115,7 +116,12 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "Pixel Code".to_owned(),
-        Arc::new(egui::FontData::from_static(PIXEL_CODE_FONT)),
+        Arc::new(
+            egui::FontData::from_static(PIXEL_CODE_FONT).tweak(egui::FontTweak {
+                scale: 1.2,
+                ..Default::default()
+            }),
+        ),
     );
     let fallback_order = vec![
         "Pixel Code".to_owned(),

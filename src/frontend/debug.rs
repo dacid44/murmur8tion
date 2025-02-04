@@ -1,7 +1,10 @@
 use std::fmt::Display;
 
 use bevy::{color::palettes::css, prelude::*, render::view::VisibilitySystems};
-use bevy_egui::egui::{self, Ui};
+use bevy_egui::{
+    egui::{self, Ui},
+    EguiContexts,
+};
 use bevy_inspector_egui::bevy_inspector;
 
 use super::{layout::ScaleToDisplay, Frame, FRAME_ASPECT_RATIO};
@@ -93,6 +96,10 @@ pub fn bevy_inspector_ui(ui: InMut<Ui>, world: &mut World) {
     egui::ScrollArea::both().show(ui.0, |ui| {
         bevy_inspector::ui_for_world(world, ui);
     });
+}
+
+pub fn egui_inspector_ui(ui: InMut<Ui>, mut contexts: EguiContexts) {
+    contexts.ctx_mut().inspection_ui(ui.0);
 }
 
 fn render_grid(

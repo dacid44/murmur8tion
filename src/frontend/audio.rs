@@ -59,13 +59,16 @@ impl Decodable for Chip8Audio {
     }
 }
 
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF00FF00FF00FF00FFu128.to_be_bytes();
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF0F0F0F0F0F0FF0F0u128.to_be_bytes();
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x0F00FF0F00FF0F00FF0F00FF0F00FF0Fu128.to_be_bytes();
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF03F03F03F03F03F0u128.to_be_bytes();
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x00FF00FF00FF00FF01FC07F01FC07F00u128.to_be_bytes();
-// pub const DEFAULT_PATTERN: [u8; 16] = 0x007FC07F007FC07F007FC07F007FC07Fu128.to_be_bytes();
-pub const DEFAULT_PATTERN: [u8; 16] = 0x007FC01FF01FC07F007FC01FF01FC07Fu128.to_be_bytes();
+const NOISE_PATTERN: [u8; 16] = [
+    0xF3, 0xC6, 0x6D, 0x47, 0x74, 0x2B, 0x70, 0x5D, 0xDB, 0x61, 0x02, 0x1A, 0xCF, 0x16, 0xBB, 0xC1,
+];
+const LOW_PITCH: [u8; 16] = [
+    0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+];
+const HIGH_PITCH: [u8; 16] = [
+    0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0,
+];
+pub const DEFAULT_PATTERN: [u8; 16] = HIGH_PITCH;
 
 const OUTPUT_SAMPLE_RATE: u32 = 44100;
 

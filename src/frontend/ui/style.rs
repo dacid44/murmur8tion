@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use bevy::{ecs::system::ResMut, render::camera::ClearColor};
 use bevy_egui::{
-    egui::{self, style::HandleShape, Color32},
+    egui::{self, epaint::text::FontInsert, style::HandleShape, Color32, FontData},
     EguiContexts,
 };
 
@@ -40,10 +42,18 @@ pub const NEUTRAL_MID: Color32 = WENGE;
 pub const NEUTRAL_DARK: Color32 = JET;
 pub const NEUTRAL_ACCENT: Color32 = CINEROUS;
 
+const PIXEL_CODE_FONT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/PixelCode/PixelCode.otf"
+));
+
+const OUTLINE_STROKE_WIDTH: f32 = 2.0;
+
 pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColor>) {
     contexts.ctx_mut().all_styles_mut(|style| {
         let visuals = &mut style.visuals;
         let widgets = &mut visuals.widgets;
+        let spacing = &mut style.spacing;
 
         visuals.handle_shape = HandleShape::Rect { aspect_ratio: 1.0 };
         visuals.menu_rounding = egui::Rounding::ZERO;
@@ -71,29 +81,54 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
 
         widgets.noninteractive.bg_fill = BACKGROUND;
         widgets.noninteractive.weak_bg_fill = BACKGROUND;
-        widgets.noninteractive.bg_stroke.color = FOREGROUND_DARK;
-        widgets.noninteractive.fg_stroke.color = FOREGROUND_LIGHT;
+        widgets.noninteractive.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_DARK);
+        widgets.noninteractive.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
 
         widgets.inactive.bg_fill = FOREGROUND_DARK;
         widgets.inactive.weak_bg_fill = FOREGROUND_DARK;
-        widgets.inactive.bg_stroke.color = ACCENT_LIGHT;
-        widgets.inactive.fg_stroke.color = FOREGROUND_LIGHT;
+        widgets.inactive.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, ACCENT_LIGHT);
+        widgets.inactive.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
 
         widgets.hovered.bg_fill = FOREGROUND_MID;
         widgets.hovered.weak_bg_fill = FOREGROUND_MID;
-        widgets.hovered.bg_stroke.color = ACCENT_LIGHT;
-        widgets.hovered.fg_stroke.color = FOREGROUND_LIGHT;
+        widgets.hovered.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, ACCENT_LIGHT);
+        widgets.hovered.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
+        widgets.hovered.expansion = 2.0;
 
         widgets.active.bg_fill = FOREGROUND_MID_DARK;
         widgets.active.weak_bg_fill = FOREGROUND_MID_DARK;
-        widgets.active.bg_stroke.color = ACCENT_LIGHT;
-        widgets.active.fg_stroke.color = FOREGROUND_LIGHT;
+        widgets.active.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, ACCENT_LIGHT);
+        widgets.active.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
+        widgets.active.expansion = 2.0;
 
         widgets.open.bg_fill = FOREGROUND_DARK;
         widgets.open.weak_bg_fill = FOREGROUND_DARK;
-        widgets.open.bg_stroke.color = ACCENT_LIGHT;
-        widgets.open.fg_stroke.color = FOREGROUND_LIGHT;
+        widgets.open.bg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, ACCENT_LIGHT);
+        widgets.open.fg_stroke = egui::Stroke::new(OUTLINE_STROKE_WIDTH, FOREGROUND_LIGHT);
+        widgets.open.expansion = 2.0;
+
+        spacing.item_spacing = egui::vec2(8.0, 8.0);
+        spacing.icon_spacing = 8.0;
+        spacing.indent = 24.0;
     });
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "Pixel Code".to_owned(),
+        Arc::new(egui::FontData::from_static(PIXEL_CODE_FONT)),
+    );
+    let fallback_order = vec![
+        "Pixel Code".to_owned(),
+        "NotoEmoji-Regular".to_owned(),
+        "emoji-icon-font".to_owned(),
+    ];
+    fonts
+        .families
+        .insert(egui::FontFamily::Proportional, fallback_order.clone());
+    fonts
+        .families
+        .insert(egui::FontFamily::Monospace, fallback_order);
+    contexts.ctx_mut().set_fonts(fonts);
 
     clear_color.0 = egui_to_bevy_color(BACKGROUND_DARK);
 }

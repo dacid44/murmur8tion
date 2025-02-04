@@ -8,7 +8,7 @@ use bevy_egui::{
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 
 use super::{
-    debug::bevy_inspector_ui,
+    debug,
     ui::{draw_main_ui, style},
 };
 
@@ -17,6 +17,7 @@ pub enum EmulatorTab {
     Main,
     Display,
     BevyInspector,
+    EguiInspector,
 }
 
 impl Display for EmulatorTab {
@@ -25,6 +26,7 @@ impl Display for EmulatorTab {
             EmulatorTab::Main => write!(f, "Main"),
             EmulatorTab::Display => write!(f, "Display"),
             EmulatorTab::BevyInspector => write!(f, "Bevy Inspector"),
+            EmulatorTab::EguiInspector => write!(f, "Egui Inspector"),
         }
     }
 }
@@ -59,8 +61,13 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                     }
                     EmulatorTab::BevyInspector => {
                         self.world
-                            .run_system_cached_with(bevy_inspector_ui, ui)
+                            .run_system_cached_with(debug::bevy_inspector_ui, ui)
                             .expect("failed to draw bevy inspector UI");
+                    }
+                    EmulatorTab::EguiInspector => {
+                        self.world
+                            .run_system_cached_with(debug::egui_inspector_ui, ui)
+                            .expect("failed to draw egui inspector UI");
                     }
                 }
                 ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
@@ -95,6 +102,10 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> egui::Color32 {
         style::BACKGROUND_NEUTRAL
+    }
+
+    fn tab_bar_hline_stroke(&self, visuals: &egui::Visuals) -> egui::Stroke {
+        visuals.widgets.noninteractive.bg_stroke
     }
 
     fn tab_bg_color(
@@ -137,17 +148,28 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
         _tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
-        ui.add_space(ui.spacing().item_spacing.x / 4.0);
-        ui.menu_button("➕", |ui| {
-            if !self.available_panes.is_empty() {
-                for pane in self.available_panes.iter() {
-                    if ui.button(pane.to_string()).clicked() {
-                        *self.add_pane = Some((tile_id, *pane));
+        ui.scope(|ui| {
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.hovered.expansion = 0.0;
+            widgets.active.expansion = 0.0;
+            widgets.open.expansion = 0.0;
+
+            ui.add_space(2.0);
+            egui::menu::menu_custom_button(
+                ui,
+                egui::Button::new("+").min_size(egui::vec2(20.0, 20.0)),
+                |ui| {
+                    if !self.available_panes.is_empty() {
+                        for pane in self.available_panes.iter() {
+                            if ui.button(pane.to_string()).clicked() {
+                                *self.add_pane = Some((tile_id, *pane));
+                            }
+                        }
+                    } else {
+                        ui.add_enabled(false, egui::Label::new("No more panes"));
                     }
-                }
-            } else {
-                ui.add_enabled(false, egui::Label::new("No more panes"));
-            }
+                },
+            );
         });
     }
 }
@@ -198,7 +220,7 @@ fn setup(mut commands: Commands) {
 
     commands.insert_resource(Layout {
         tree,
-        available_panes: vec![EmulatorTab::BevyInspector],
+        available_panes: vec![EmulatorTab::BevyInspector, EmulatorTab::EguiInspector],
     });
 }
 

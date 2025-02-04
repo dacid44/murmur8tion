@@ -7,6 +7,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
+use bevy_egui::EguiContexts;
 
 use crate::{
     model::{self, DynamicModel, Model},
@@ -14,19 +15,18 @@ use crate::{
 };
 
 pub mod audio;
+mod debug;
+mod layout;
 mod machine;
 mod rom;
 mod ui;
 
 #[derive(Resource)]
-struct FrameHandle(Handle<Image>);
+struct Frame {
+    handle: Handle<Image>,
+    size: UVec2,
+}
 
-#[derive(Resource, Default)]
-struct DisplayRect(Rect);
-
-#[derive(Component)]
-#[require(Transform)]
-struct ScaleToDisplay(Vec2);
 
 #[derive(Resource)]
 struct EmulatorData {
@@ -66,16 +66,17 @@ const FRAME_ASPECT_RATIO: Vec2 = Vec2::new(2.0, 1.0);
 
 pub fn emulator_plugin(app: &mut App) {
     app.init_resource::<EmulatorData>()
-        .init_resource::<DisplayRect>()
         .add_event::<EmulatorEvent>()
         .add_audio_source::<Chip8Audio>()
         .add_systems(Startup, setup)
-        .add_systems(
-            PostUpdate,
-            scale_display.run_if(resource_changed::<DisplayRect>),
-        )
         .register_diagnostic(Diagnostic::new(EMULATOR_TICK_RATE))
-        .add_plugins((machine::machine_plugin, ui::ui_plugin, rom::rom_plugin));
+        .add_plugins((
+            layout::layout_plugin,
+            machine::machine_plugin,
+            ui::ui_plugin,
+            rom::rom_plugin,
+            debug::debug_plugin,
+        ));
 }
 
 fn setup(
@@ -101,22 +102,14 @@ fn setup(
 
     let mut sprite = Sprite::from_image(handle.clone());
     sprite.custom_size = Some(FRAME_ASPECT_RATIO);
-    commands.spawn((sprite, ScaleToDisplay(FRAME_ASPECT_RATIO)));
-    commands.insert_resource(FrameHandle(handle));
+    commands.spawn((sprite, layout::ScaleToDisplay(FRAME_ASPECT_RATIO)));
+    commands.insert_resource(Frame {
+        handle,
+        size: UVec2::new(1, 1),
+    });
 
     let audio = Chip8Audio::new();
     let beeper_handle = audio_assets.add(audio.clone());
     commands.spawn(AudioPlayer(beeper_handle));
     commands.insert_resource(audio);
-}
-
-fn scale_display(
-    display_rect: Res<DisplayRect>,
-    mut display_transforms: Query<(&mut Transform, &ScaleToDisplay)>,
-) {
-    for (mut transform, ratio) in display_transforms.iter_mut() {
-        let scale = (display_rect.0.size() / ratio.0).min_element();
-        transform.translation.x = display_rect.0.min.x / 2.0;
-        transform.scale = Vec3::new(scale, scale, 1.0);
-    }
 }

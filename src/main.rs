@@ -1,4 +1,5 @@
 use bevy::{prelude::*, winit::WinitSettings};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use model::Model;
 
 mod frontend;

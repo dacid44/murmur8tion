@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use arbitrary_int::u4;
 use bevy::{
     input::{keyboard::KeyboardInput, ButtonState},
     prelude::*,
@@ -7,14 +8,13 @@ use bevy::{
 };
 use image::RgbaImage;
 use keymap::KeyMapping;
-use arbitrary_int::u4;
 
 use crate::{
     hardware::{DynamicMachine, KeyEvent},
     model::{DynamicModel, Model},
 };
 
-use super::{audio::Chip8Audio, rom::Rom, EmulatorData, EmulatorEvent, FrameHandle};
+use super::{audio::Chip8Audio, rom::Rom, EmulatorData, EmulatorEvent, Frame};
 
 mod keymap;
 
@@ -97,7 +97,7 @@ fn machine_system(
     mut commands: Commands,
     mut machine: ResMut<Machine>,
     ui_data: Res<EmulatorData>,
-    emulator_output: Res<FrameHandle>,
+    mut frame: ResMut<Frame>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if ui_data.paused {
@@ -105,9 +105,9 @@ fn machine_system(
     }
 
     let image = images
-        .get_mut(&emulator_output.0)
+        .get_mut(&frame.handle)
         .expect("Emulator frame not found");
-    write_frame(image, machine.machine.render_frame(&ui_data.palette));
+    frame.size = write_frame(image, machine.machine.render_frame(&ui_data.palette));
 
     for _ in 0..(ui_data.cycles_per_frame) {
         if let Some((key, event)) = machine.queued_inputs.pop_front() {
@@ -115,7 +115,7 @@ fn machine_system(
         }
         if let Err(error) = machine.machine.tick() {
             error!("Emulator error: {error}");
-            write_frame(image, machine.machine.render_frame(&ui_data.palette));
+            frame.size = write_frame(image, machine.machine.render_frame(&ui_data.palette));
             commands.remove_resource::<Machine>();
             return;
         }
@@ -144,7 +144,7 @@ fn machine_audio(
     }
 }
 
-fn write_frame(texture: &mut Image, frame: RgbaImage) {
+fn write_frame(texture: &mut Image, frame: RgbaImage) -> UVec2 {
     if texture.width() != frame.width() || texture.height() != texture.height() {
         texture.resize(Extent3d {
             width: frame.width(),
@@ -153,4 +153,5 @@ fn write_frame(texture: &mut Image, frame: RgbaImage) {
         });
     }
     texture.data = frame.into_vec();
+    texture.size()
 }

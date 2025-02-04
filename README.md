@@ -11,4 +11,4 @@ A CHIP-8 emulator built in Rust with the Bevy game engine. I've written it to be
 
 ## License
 
-This project is distributed under the MIT License. This does not include the ROMs in the [`roms`](roms/) folder.
+This project is distributed under the MIT License.

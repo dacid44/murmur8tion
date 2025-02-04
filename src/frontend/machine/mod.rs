@@ -19,8 +19,8 @@ use super::{audio::Chip8Audio, rom::Rom, EmulatorData, EmulatorEvent, Frame};
 mod keymap;
 
 #[derive(Resource)]
-struct Machine {
-    machine: DynamicMachine,
+pub struct Machine {
+    pub machine: DynamicMachine,
     queued_inputs: VecDeque<(u4, KeyEvent)>,
 }
 

@@ -18,6 +18,7 @@ pub enum EmulatorTab {
     Display,
     BevyInspector,
     EguiInspector,
+    Memory,
 }
 
 impl Display for EmulatorTab {
@@ -27,6 +28,7 @@ impl Display for EmulatorTab {
             EmulatorTab::Display => write!(f, "Display"),
             EmulatorTab::BevyInspector => write!(f, "Bevy Inspector"),
             EmulatorTab::EguiInspector => write!(f, "Egui Inspector"),
+            EmulatorTab::Memory => write!(f, "Memory"),
         }
     }
 }
@@ -68,6 +70,11 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                         self.world
                             .run_system_cached_with(debug::egui_inspector_ui, ui)
                             .expect("failed to draw egui inspector UI");
+                    }
+                    EmulatorTab::Memory => {
+                        self.world
+                            .run_system_cached_with(debug::memory_ui, ui)
+                            .expect("failed to draw memory view UI");
                     }
                 }
                 ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
@@ -220,7 +227,11 @@ fn setup(mut commands: Commands) {
 
     commands.insert_resource(Layout {
         tree,
-        available_panes: vec![EmulatorTab::BevyInspector, EmulatorTab::EguiInspector],
+        available_panes: vec![
+            EmulatorTab::BevyInspector,
+            EmulatorTab::EguiInspector,
+            EmulatorTab::Memory,
+        ],
     });
 }
 

@@ -1,13 +1,13 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::DerefMut};
 
 use bevy::{color::palettes::css, prelude::*, render::view::VisibilitySystems};
 use bevy_egui::{
-    egui::{self, Ui},
+    egui::{self, scroll_area::ScrollBarVisibility, Ui},
     EguiContexts,
 };
 use bevy_inspector_egui::bevy_inspector;
 
-use super::{layout::ScaleToDisplay, Frame, FRAME_ASPECT_RATIO};
+use super::{layout::ScaleToDisplay, machine::Machine, ui::style, Frame, FRAME_ASPECT_RATIO};
 
 #[derive(Resource, Clone, Default)]
 pub struct DebugOptions {
@@ -139,4 +139,58 @@ fn render_grid(
             css::RED,
         );
     }
+}
+
+pub fn memory_ui(ui: InMut<Ui>, machine: Option<Res<Machine>>, mut bytes_per_row: Local<usize>) {
+    if *bytes_per_row == 0 {
+        *bytes_per_row = 8;
+    }
+    let memory = machine
+        .as_ref()
+        .map(|machine| machine.machine.memory())
+        .unwrap_or(&[]);
+    let num_rows = if memory.is_empty() {
+        0
+    } else {
+        (memory.len() - 1) / *bytes_per_row + 1
+    };
+
+    ui.0.horizontal(|ui| {
+        ui.label("Bytes per row:");
+        ui.selectable_value(&mut *bytes_per_row, 8, "8");
+        ui.selectable_value(&mut *bytes_per_row, 16, "16");
+        ui.selectable_value(&mut *bytes_per_row, 32, "32");
+    });
+
+    ui.0.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+
+        egui::ScrollArea::both().auto_shrink(false).show_rows(
+            ui,
+            ui.text_style_height(&egui::TextStyle::Body),
+            num_rows,
+            |ui, rows| {
+                for (i, chunk) in memory
+                    .chunks(*bytes_per_row)
+                    .enumerate()
+                    .skip(rows.start)
+                    .take(rows.end - rows.start)
+                {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{:#06X}", i * *bytes_per_row));
+                        for (j, byte) in chunk.iter().enumerate() {
+                            ui.colored_label(
+                                if j % 2 == 0 {
+                                    style::FOREGROUND_LIGHT
+                                } else {
+                                    style::FOREGROUND_MID
+                                },
+                                format!("{:02X}", byte),
+                            );
+                        }
+                    });
+                }
+            },
+        );
+    });
 }

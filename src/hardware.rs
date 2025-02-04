@@ -83,6 +83,7 @@ impl DynamicMachine {
     dynamic_machine_method!(sound_active(self: &Self) -> bool);
     dynamic_machine_method!(pitch(self: &Self) -> u8);
     dynamic_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
+    dynamic_machine_method!(memory(self: &Self) -> &[u8]);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
 }
 
@@ -302,6 +303,10 @@ impl<Model: model::Model> Chip8<Model> {
 
     pub fn audio_pattern(&self) -> &[u8; 16] {
         &self.audio_pattern
+    }
+
+    pub fn memory(&self) -> &[u8] {
+        &self.memory
     }
 
     fn mem_slice(&self, range: impl RangeBounds<usize>) -> Result<&[u8]> {

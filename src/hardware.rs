@@ -5,7 +5,7 @@ use std::{
     slice::SliceIndex,
 };
 
-use arbitrary_int::{u4, Number};
+use arbitrary_int::{u12, u4, Number};
 use bevy::log::{info_span, warn};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -436,6 +436,10 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
     // Returns a boolean specifying whether to exit
     pub fn tick(&mut self) -> Result<bool> {
         use Instruction as I;
+        use Instruction::SuperChip as Sc;
+        use Instruction::XoChip as Xc;
+        use InstructionSet::SuperChip as IsSc;
+        use InstructionSet::XoChip as IsXc;
         use SuperChipInstruction as Sci;
         use XoChipInstruction as Xci;
 
@@ -445,146 +449,258 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
         // puffin::profile_function!(format!("{word:#06X}"));
 
         let raw_instruction = word;
-        let instruction = Instruction::from_u16(raw_instruction, self.model.instruction_set())
-            .ok_or(Error::InvalidInstruction(raw_instruction))?;
         self.cpu.inc_pc()?;
 
-        // println!("Instruction: {raw_instruction:#06X}, {instruction:?}");
-        match instruction {
-            I::Exit0 => {
+        let [disc1, y_u8] = ((raw_instruction & 0xF0F0) >> 4).to_be_bytes();
+        let [x_u8, n_u8] = (raw_instruction & 0x0F0F).to_be_bytes();
+        let [x, y, n] = [x_u8, y_u8, n_u8].map(|nibble| unsafe { u4::new_unchecked(nibble) });
+        let kk = (raw_instruction & 0xFF) as u8;
+        let nnn = raw_instruction & 0xFFF;
+
+        let _ = match (disc1, x_u8, y_u8, n_u8, self.model.instruction_set()) {
+            (0x10.., _, _, _, _)
+            | (_, 0x10.., _, _, _)
+            | (_, _, 0x10.., _, _)
+            | (_, _, _, 0x10.., _) => unsafe { std::hint::unreachable_unchecked() },
+            (0x0, 0x0, 0x0, 0x0, _) => {
                 if self.model.quirks().graceful_exit_on_0000 {
                     return Ok(true);
                 } else {
                     return Err(Error::InvalidInstruction(raw_instruction));
                 }
+                // I::Exit0
             }
-            I::Cls => self.screen.clear(),
-            I::Ret => self.cpu.pop_stack()?,
-            I::Jp { nnn } => self.cpu.pc = nnn.into(),
-            I::JpV0 { nnn } => {
-                let reg = if self.model.quirks().jump_v0_use_vx {
-                    (u16::from(nnn) >> 8) as usize
-                } else {
-                    0
-                };
-                self.cpu.pc = u16::from(nnn) + self.cpu.v[reg] as u16;
+            (0x0, 0x0, 0xC, _, IsSc | IsXc) => {
+                self.screen.scroll_down(n)?;
+                Sc(Sci::ScrollDown { n })
             }
-            I::Call { nnn } => {
-                self.cpu.push_stack()?;
-                self.cpu.pc = nnn.into();
+            (0x0, 0x0, 0xD, _, IsXc) => {
+                self.screen.scroll_up(n)?;
+                Xc(Xci::ScrollUp { n })
             }
-            I::Se(args) => {
-                let (a, b) = self.cpu.get_args(args);
-                self.skip_if(a == b)?;
+            (0x0, 0x0, 0xE, 0x0, _) => {
+                self.screen.clear();
+                I::Cls
             }
-            I::Sne(args) => {
-                let (a, b) = self.cpu.get_args(args);
-                self.skip_if(a != b)?;
+            (0x0, 0x0, 0xE, 0xE, _) => {
+                self.cpu.pop_stack()?;
+                I::Cls
             }
-            I::Skp { x } => self.skip_if(self.keypad.is_pressed(self.cpu.get_v(x)))?,
-            I::Sknp { x } => self.skip_if(!self.keypad.is_pressed(self.cpu.get_v(x)))?,
-            I::Ld(args) => {
-                let (reg, val) = self.cpu.get_args_mut(args);
-                *reg = val;
+            (0x0, 0x0, 0xF, 0xB, IsSc | IsXc) => {
+                self.screen.scroll_right()?;
+                Sc(Sci::ScrollRight)
             }
-            I::LdI { nnn } => self.cpu.i = u16::from(nnn),
-            I::LdToDt { x } => self.cpu.dt = self.cpu.get_v(x),
-            I::LdFromDt { x } => self.cpu.set_v(x, self.cpu.dt),
-            I::LdSt { x } => self.cpu.st = self.cpu.get_v(x),
-            I::LdFromKey { x } => {
-                if let Some(key) = self.keypad.test_event() {
-                    self.cpu.set_v(x, u8::from(key));
-                } else {
-                    self.cpu.dec_pc();
+            (0x0, 0x0, 0xF, 0xC, IsSc | IsXc) => {
+                self.screen.scroll_left()?;
+                Sc(Sci::ScrollLeft)
+            }
+            (0x0, 0x0, 0xF, 0xD, IsSc | IsXc) => {
+                return Ok(true);
+                // Sc(Sci::Exit)
+            }
+            (0x0, 0x0, 0xF, 0xE, IsSc | IsXc) => {
+                self.screen.set_hires(false)?;
+                if self.model.quirks().clear_screen_on_mode_switch {
+                    self.screen.clear();
                 }
+                Sc(Sci::LoRes)
             }
-            I::LdF { x } => {
-                self.cpu.i = ((self.cpu.get_v(x) & 0xF) * screen::FONT[0].len() as u8) as u16
-                    + screen::FONT_ADDRESS as u16
+            (0x0, 0x0, 0xF, 0xF, IsSc | IsXc) => {
+                self.screen.set_hires(true)?;
+                if self.model.quirks().clear_screen_on_mode_switch {
+                    self.screen.clear();
+                }
+                Sc(Sci::HiRes)
             }
-            I::LdB { x } => {
-                let digits = bcd(self.cpu.get_v(x));
-                self.mem_slice_mut(self.cpu.i as usize..=self.cpu.i as usize + 2)?
-                    .copy_from_slice(&digits);
+            (0x1, _, _, _, _) => {
+                self.cpu.pc = nnn;
+                I::Jp { nnn: u12::new(nnn) }
             }
-            I::LdToSlice { x } => {
+            (0x2, _, _, _, _) => {
+                self.cpu.push_stack()?;
+                self.cpu.pc = nnn;
+                I::Call { nnn: u12::new(nnn) }
+            }
+            (0x3, _, _, _, _) => {
+                self.skip_if(self.cpu.get_v(x) == kk)?;
+                I::Se(Args::XKk { x, kk })
+            }
+            (0x4, _, _, _, _) => {
+                self.skip_if(self.cpu.get_v(x) != kk)?;
+                I::Sne(Args::XKk { x, kk })
+            }
+            (0x5, _, _, 0x0, _) => {
+                self.skip_if(self.cpu.get_v(x) == self.cpu.get_v(y))?;
+                I::Se(Args::XY { x, y })
+            }
+            (0x5, _, _, 0x2, IsXc) => {
+                let x_usize = u8::from(x) as usize;
+                let y_usize = u8::from(y) as usize;
                 let mut data = [0; 16];
-                let slice = &mut data[..=u8::from(x) as usize];
-                slice.copy_from_slice(&self.cpu.v[..slice.len()]);
+                let slice = &mut data[..=x_usize.abs_diff(y_usize)];
+                if y_usize >= x_usize {
+                    slice.copy_from_slice(&self.cpu.v[x_usize..=y_usize]);
+                } else {
+                    slice.copy_from_slice(&self.cpu.v[y_usize..=x_usize]);
+                    slice.reverse();
+                }
                 self.mem_slice_mut(self.cpu.i as usize..self.cpu.i as usize + slice.len())?
                     .copy_from_slice(slice);
-                if self.model.quirks().inc_i_on_slice {
-                    self.cpu.i += slice.len() as u16;
-                }
+                Xc(Xci::RegRangeToMem { x, y })
             }
-            I::LdFromSlice { x } => {
+            (0x5, _, _, 0x3, IsXc) => {
+                let x_usize = u8::from(x) as usize;
+                let y_usize = u8::from(y) as usize;
                 let mut data = [0; 16];
-                let slice = &mut data[..=u8::from(x) as usize];
+                let slice = &mut data[..=x_usize.abs_diff(y_usize)];
                 slice.copy_from_slice(
                     self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
                 );
-                self.cpu.v[..slice.len()].copy_from_slice(slice);
-                if self.model.quirks().inc_i_on_slice {
-                    self.cpu.i += slice.len() as u16;
+                if y_usize >= x_usize {
+                    self.cpu.v[x_usize..=y_usize].copy_from_slice(slice);
+                } else {
+                    slice.reverse();
+                    self.cpu.v[y_usize..=x_usize].copy_from_slice(slice);
                 }
+                Xc(Xci::RegRangeFromMem { x, y })
             }
-            I::Add(Args::XKk { x, kk }) => {
+            (0x6, _, _, _, _) => {
+                self.cpu.set_v(x, kk);
+                I::Ld(Args::XKk { x, kk })
+            }
+            (0x7, _, _, _, _) => {
                 self.cpu.set_v(x, self.cpu.get_v(x).wrapping_add(kk));
+                I::Add(Args::XKk { x, kk })
             }
-            I::Add(Args::XY { x, y }) => self.cpu.arithmetic_op_vf(x, y, u8::overflowing_add),
-            I::AddI { x } => self.cpu.i = self.cpu.i.wrapping_add(self.cpu.get_v(x) as u16),
-            I::Or { x, y } => self.cpu.arithmetic_op(
-                x,
-                y,
-                std::ops::BitOr::bitor,
-                self.model.quirks().bitwise_reset_flag,
-            ),
-            I::And { x, y } => self.cpu.arithmetic_op(
-                x,
-                y,
-                std::ops::BitAnd::bitand,
-                self.model.quirks().bitwise_reset_flag,
-            ),
-            I::Xor { x, y } => self.cpu.arithmetic_op(
-                x,
-                y,
-                std::ops::BitXor::bitxor,
-                self.model.quirks().bitwise_reset_flag,
-            ),
-            I::Shl { x, y } => self.cpu.arithmetic_op_vf(
-                x,
-                if self.model.quirks().bitshift_use_y {
-                    y
-                } else {
+            (0x8, _, _, 0x0, _) => {
+                self.cpu.set_v(x, self.cpu.get_v(y));
+                I::Ld(Args::XY { x, y })
+            }
+            (0x8, _, _, 0x1, _) => {
+                self.cpu.arithmetic_op(
+                    x,
+                    y,
+                    std::ops::BitOr::bitor,
+                    self.model.quirks().bitwise_reset_flag,
+                );
+                I::Or { x, y }
+            }
+            (0x8, _, _, 0x2, _) => {
+                self.cpu.arithmetic_op(
+                    x,
+                    y,
+                    std::ops::BitAnd::bitand,
+                    self.model.quirks().bitwise_reset_flag,
+                );
+                I::And { x, y }
+            }
+            (0x8, _, _, 0x3, _) => {
+                self.cpu.arithmetic_op(
+                    x,
+                    y,
+                    std::ops::BitXor::bitxor,
+                    self.model.quirks().bitwise_reset_flag,
+                );
+                I::Xor { x, y }
+            }
+            (0x8, _, _, 0x4, _) => {
+                self.cpu.arithmetic_op_vf(x, y, u8::overflowing_add);
+                I::Add(Args::XY { x, y })
+            }
+            (0x8, _, _, 0x5, _) => {
+                self.cpu.arithmetic_op_vf(x, y, |a, b| {
+                    let (result, borrow) = a.overflowing_sub(b);
+                    (result, !borrow)
+                });
+                I::Sub { x, y }
+            }
+            (0x8, _, _, 0x6, _) => {
+                self.cpu.arithmetic_op_vf(
+                    x,
+                    if self.model.quirks().bitshift_use_y {
+                        y
+                    } else {
+                        x
+                    },
+                    |_, b| {
+                        let overflow_bit = b & 0b1 != 0;
+                        (b >> 1, overflow_bit)
+                    },
+                );
+                I::Shr { x, y }
+            }
+            (0x8, _, _, 0x7, _) => {
+                self.cpu.arithmetic_op_vf(x, y, |a, b| {
+                    let (result, borrow) = b.overflowing_sub(a);
+                    (result, !borrow)
+                });
+                I::Subn { x, y }
+            }
+            (0x8, _, _, 0xE, _) => {
+                self.cpu.arithmetic_op_vf(
+                    x,
+                    if self.model.quirks().bitshift_use_y {
+                        y
+                    } else {
+                        x
+                    },
+                    |_, b| {
+                        let overflow_bit = b & 0b10000000 != 0;
+                        (b << 1, overflow_bit)
+                    },
+                );
+                I::Shl { x, y }
+            }
+            (0x9, _, _, 0x0, _) => {
+                self.skip_if(self.cpu.get_v(x) != self.cpu.get_v(y))?;
+                I::Sne(Args::XY { x, y })
+            }
+            (0xA, _, _, _, _) => {
+                self.cpu.i = nnn;
+                I::LdI { nnn: u12::new(nnn) }
+            }
+            (0xB, _, _, _, _) => {
+                let offset = self.cpu.get_v(if self.model.quirks().jump_v0_use_vx {
                     x
-                },
-                |_, b| {
-                    let overflow_bit = b & 0b10000000 != 0;
-                    (b << 1, overflow_bit)
-                },
-            ),
-            I::Shr { x, y } => self.cpu.arithmetic_op_vf(
-                x,
-                if self.model.quirks().bitshift_use_y {
-                    y
                 } else {
-                    x
-                },
-                |_, b| {
-                    let overflow_bit = b & 0b1 != 0;
-                    (b >> 1, overflow_bit)
-                },
-            ),
-            I::Sub { x, y } => self.cpu.arithmetic_op_vf(x, y, |a, b| {
-                let (result, borrow) = a.overflowing_sub(b);
-                (result, !borrow)
-            }),
-            I::Subn { x, y } => self.cpu.arithmetic_op_vf(x, y, |a, b| {
-                let (result, borrow) = b.overflowing_sub(a);
-                (result, !borrow)
-            }),
-            I::Rnd { x, kk } => self.cpu.set_v(x, self.rng.random::<u8>() & kk),
-            I::Drw { x, y, n } => {
+                    u4::new(0)
+                });
+                self.cpu.pc = nnn + offset as u16;
+                I::JpV0 { nnn: u12::new(nnn) }
+            }
+            (0xC, _, _, _, _) => {
+                self.cpu.set_v(x, self.rng.random::<u8>() & kk);
+                I::Rnd { x, kk }
+            }
+            (0xD, _, _, 0, IsSc | IsXc) => {
+                if self.draw_wait_for_vblank() && !self.vblank {
+                    self.cpu.dec_pc();
+                } else {
+                    let x_val = self.cpu.get_v(x);
+                    let y_val = self.cpu.get_v(y);
+                    if self.model.quirks().lores_draw_large_as_small && !self.screen.get_hires() {
+                        let mut data = [0; 64];
+                        let slice = &mut data[..16 * self.screen.num_active_planes()];
+                        slice.copy_from_slice(
+                            self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
+                        );
+                        self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
+                    } else {
+                        let mut data = [0; 128];
+                        let slice = &mut data[..32 * self.screen.num_active_planes()];
+                        slice.copy_from_slice(
+                            self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
+                        );
+                        self.cpu.v[0xF] = self.screen.draw_large_sprite(
+                            x_val,
+                            y_val,
+                            bytemuck::cast_slice(slice),
+                        )?;
+                    }
+                }
+                Sc(Sci::DrawLarge { x, y })
+            }
+            (0xD, _, _, _, _) => {
                 if self.draw_wait_for_vblank() && !self.vblank {
                     self.cpu.dec_pc();
                 } else {
@@ -597,128 +713,117 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                     );
                     self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
                 }
+                I::Drw { x, y, n }
             }
-            I::SuperChip(sc_instruction) => {
-                if self.model.instruction_set() >= InstructionSet::SuperChip {
-                    match sc_instruction {
-                        Sci::Exit => return Ok(true),
-                        Sci::LoRes => {
-                            self.screen.set_hires(false)?;
-                            if self.model.quirks().clear_screen_on_mode_switch {
-                                self.screen.clear();
-                            }
-                        }
-                        Sci::HiRes => {
-                            self.screen.set_hires(true)?;
-                            if self.model.quirks().clear_screen_on_mode_switch {
-                                self.screen.clear();
-                            }
-                        }
-                        Sci::DrawLarge { x, y } => {
-                            if self.draw_wait_for_vblank() && !self.vblank {
-                                self.cpu.dec_pc();
-                            } else {
-                                let x_val = self.cpu.get_v(x);
-                                let y_val = self.cpu.get_v(y);
-                                if self.model.quirks().lores_draw_large_as_small
-                                    && !self.screen.get_hires()
-                                {
-                                    let mut data = [0; 64];
-                                    let slice = &mut data[..16 * self.screen.num_active_planes()];
-                                    slice.copy_from_slice(self.mem_slice(
-                                        self.cpu.i as usize..self.cpu.i as usize + slice.len(),
-                                    )?);
-                                    self.cpu.v[0xF] =
-                                        self.screen.draw_sprite(x_val, y_val, slice) as u8;
-                                } else {
-                                    let mut data = [0; 128];
-                                    let slice = &mut data[..32 * self.screen.num_active_planes()];
-                                    slice.copy_from_slice(self.mem_slice(
-                                        self.cpu.i as usize..self.cpu.i as usize + slice.len(),
-                                    )?);
-                                    self.cpu.v[0xF] = self.screen.draw_large_sprite(
-                                        x_val,
-                                        y_val,
-                                        bytemuck::cast_slice(slice),
-                                    )?;
-                                }
-                            }
-                        }
-                        Sci::StoreRegs { x } => self.rpl[..=u8::from(x) as usize]
-                            .copy_from_slice(&self.cpu.v[..=u8::from(x) as usize]),
-                        Sci::GetRegs { x } => self.cpu.v[..=u8::from(x) as usize]
-                            .copy_from_slice(&self.rpl[..=u8::from(x) as usize]),
-                        Sci::ScrollDown { n } => self.screen.scroll_down(n)?,
-                        Sci::ScrollRight => self.screen.scroll_right()?,
-                        Sci::ScrollLeft => self.screen.scroll_left()?,
-                        Sci::LdHiResF { x } => {
-                            self.cpu.i = ((self.cpu.get_v(x) & 0xF)
-                                * screen::XOCHIP_HIRES_FONT[0].len() as u8)
-                                as u16
-                                + screen::XOCHIP_HIRES_FONT_ADDRESS as u16
-                        }
-                    }
+            (0xE, _, 0x9, 0xE, _) => {
+                self.skip_if(self.keypad.is_pressed(self.cpu.get_v(x)))?;
+                I::Skp { x }
+            }
+            (0xE, _, 0xA, 0x1, _) => {
+                self.skip_if(!self.keypad.is_pressed(self.cpu.get_v(x)))?;
+                I::Sknp { x }
+            }
+            (0xF, 0x0, 0x0, 0x0, IsXc) => {
+                let addr = self.read_word()?;
+                self.cpu.inc_pc()?;
+                self.cpu.i = addr;
+                Xc(Xci::LdILong)
+            }
+            (0xF, _, 0x0, 0x1, IsXc) => {
+                self.screen.set_planes(x)?;
+                Xc(Xci::SelectPlanes { x })
+            }
+            (0xF, 0x0, 0x0, 0x2, IsXc) => {
+                let mut data = [0; 16];
+                data.copy_from_slice(
+                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + 16)?,
+                );
+                self.audio_pattern = data;
+                Xc(Xci::WriteAudio)
+            }
+            (0xF, _, 0x0, 0x7, _) => {
+                self.cpu.set_v(x, self.cpu.dt);
+                I::LdFromDt { x }
+            }
+            (0xF, _, 0x0, 0xA, _) => {
+                if let Some(key) = self.keypad.test_event() {
+                    self.cpu.set_v(x, u8::from(key));
                 } else {
                     self.cpu.dec_pc();
-                    return Err(Error::UnsupportedInstruction(instruction));
                 }
+                I::LdFromKey { x }
             }
-            I::XoChip(xc_instruction) => {
-                if self.model.instruction_set() >= InstructionSet::XoChip {
-                    match xc_instruction {
-                        Xci::ScrollUp { n } => self.screen.scroll_up(n)?,
-                        Xci::RegRangeToMem { x, y } => {
-                            let x = u8::from(x) as usize;
-                            let y = u8::from(y) as usize;
-                            let mut data = [0; 16];
-                            let slice = &mut data[..=x.abs_diff(y)];
-                            if y >= x {
-                                slice.copy_from_slice(&self.cpu.v[x..=y]);
-                            } else {
-                                slice.copy_from_slice(&self.cpu.v[y..=x]);
-                                slice.reverse();
-                            }
-                            self.mem_slice_mut(
-                                self.cpu.i as usize..self.cpu.i as usize + slice.len(),
-                            )?
-                            .copy_from_slice(slice);
-                        }
-                        Xci::RegRangeFromMem { x, y } => {
-                            let x = u8::from(x) as usize;
-                            let y = u8::from(y) as usize;
-                            let mut data = [0; 16];
-                            let slice = &mut data[..=x.abs_diff(y)];
-                            slice.copy_from_slice(self.mem_slice(
-                                self.cpu.i as usize..self.cpu.i as usize + slice.len(),
-                            )?);
-                            if y >= x {
-                                self.cpu.v[x..=y].copy_from_slice(slice);
-                            } else {
-                                slice.reverse();
-                                self.cpu.v[y..=x].copy_from_slice(slice);
-                            }
-                        }
-                        Xci::LdILong => {
-                            let addr = self.read_word()?;
-                            self.cpu.inc_pc()?;
-                            self.cpu.i = addr;
-                        }
-                        Xci::SelectPlanes { x } => self.screen.set_planes(x)?,
-                        Xci::WriteAudio => {
-                            let mut data = [0; 16];
-                            data.copy_from_slice(
-                                self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + 16)?,
-                            );
-                            self.audio_pattern = data;
-                        }
-                        Xci::SetPitch { x } => self.pitch = self.cpu.get_v(x),
-                    }
-                } else {
-                    self.cpu.dec_pc();
-                    return Err(Error::UnsupportedInstruction(instruction));
+            (0xF, _, 0x1, 0x5, _) => {
+                self.cpu.dt = self.cpu.get_v(x);
+                I::LdToDt { x }
+            }
+            (0xF, _, 0x1, 0x8, _) => {
+                self.cpu.st = self.cpu.get_v(x);
+                I::LdSt { x }
+            }
+            (0xF, _, 0x1, 0xE, _) => {
+                self.cpu.i = self.cpu.i.wrapping_add(self.cpu.get_v(x) as u16);
+                I::AddI { x }
+            }
+            (0xF, _, 0x2, 0x9, _) => {
+                self.cpu.i = ((self.cpu.get_v(x) & 0xF) * screen::FONT[0].len() as u8) as u16
+                    + screen::FONT_ADDRESS as u16;
+                I::LdF { x }
+            }
+            (0xF, _, 0x3, 0x0, IsSc | IsXc) => {
+                self.cpu.i = ((self.cpu.get_v(x) & 0xF) * screen::XOCHIP_HIRES_FONT[0].len() as u8)
+                    as u16
+                    + screen::XOCHIP_HIRES_FONT_ADDRESS as u16;
+                Sc(Sci::LdHiResF { x })
+            }
+            (0xF, _, 0x3, 0x3, _) => {
+                let digits = bcd(self.cpu.get_v(x));
+                self.mem_slice_mut(self.cpu.i as usize..=self.cpu.i as usize + 2)?
+                    .copy_from_slice(&digits);
+                I::LdB { x }
+            }
+            (0xF, _, 0x3, 0xA, IsXc) => {
+                self.pitch = self.cpu.get_v(x);
+                Xc(Xci::SetPitch { x })
+            }
+            (0xF, _, 0x5, 0x5, _) => {
+                let mut data = [0; 16];
+                let slice = &mut data[..=u8::from(x) as usize];
+                slice.copy_from_slice(&self.cpu.v[..slice.len()]);
+                self.mem_slice_mut(self.cpu.i as usize..self.cpu.i as usize + slice.len())?
+                    .copy_from_slice(slice);
+                if self.model.quirks().inc_i_on_slice {
+                    self.cpu.i += slice.len() as u16;
                 }
+                I::LdToSlice { x }
             }
-        }
+            (0xF, _, 0x6, 0x5, _) => {
+                let mut data = [0; 16];
+                let slice = &mut data[..=u8::from(x) as usize];
+                slice.copy_from_slice(
+                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
+                );
+                self.cpu.v[..slice.len()].copy_from_slice(slice);
+                if self.model.quirks().inc_i_on_slice {
+                    self.cpu.i += slice.len() as u16;
+                }
+                I::LdFromSlice { x }
+            }
+            (0xF, _, 0x7, 0x5, IsSc | IsXc) => {
+                self.rpl[..=u8::from(x) as usize]
+                    .copy_from_slice(&self.cpu.v[..=u8::from(x) as usize]);
+                Sc(Sci::StoreRegs { x })
+            }
+            (0xF, _, 0x8, 0x5, IsSc | IsXc) => {
+                self.cpu.v[..=u8::from(x) as usize]
+                    .copy_from_slice(&self.rpl[..=u8::from(x) as usize]);
+                Sc(Sci::GetRegs { x })
+            },
+            _ => {
+                self.cpu.dec_pc();
+                return Err(Error::InvalidInstruction(raw_instruction));
+            },
+        };
 
         if self.vblank {
             self.vblank = false;

@@ -1,30 +1,5 @@
 use arbitrary_int::{u12, u4};
 use bitbybit::bitfield;
-use tracing::info_span;
-
-macro_rules! match_ux {
-    ($type:path; $match_type:ident; $max:literal; $x: expr; $name: ident; $($match:tt)*) => {
-        {
-            let $name: $type = $x;
-            const UNREACHABLE_START: $match_type = ::arbitrary_int::UInt::value(<$type as ::arbitrary_int::Number>::MAX) + 1;
-            match $match_type::from($name) {
-                // UNREACHABLE_START.. => unsafe { ::std::hint::unreachable_unchecked() },
-                UNREACHABLE_START => unreachable!(),
-                $($match)*
-            }
-        }
-    };
-}
-
-macro_rules! match_u4 {
-    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::arbitrary_int::u4; u8; 0x10; $x; $name; $($match)* } };
-    ($x:expr; $($match:tt)*) => { match_u4!{$x; x; $($match)* } };
-}
-
-macro_rules! match_u12 {
-    ($x:expr; $name: ident; $($match:tt)*) => { match_ux! { ::arbitrary_int::u12; u16; 0x1000; $x; $name; $($match)* } };
-    ($x:expr; $($match:tt)*) => { match_u12!{$x; x; $($match)* } };
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InstructionSet {

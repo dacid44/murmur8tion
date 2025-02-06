@@ -1,14 +1,16 @@
 use std::ops::BitOr;
 
 use arbitrary_int::u4;
+use bytemuck::Zeroable;
 use image::RgbaImage;
 
 use super::{
     combine_planes, double_bits_holger, double_bits_magic, draw_line, Palette, Result, Screen,
 };
 
+#[derive(Zeroable)]
 pub struct XoChipScreen {
-    data: Box<[[u128; 64]; 4]>,
+    data: [[u128; 64]; 4],
     enabled_planes: [bool; 4],
     hires: bool,
 }
@@ -26,13 +28,11 @@ impl XoChipScreen {
     }
 }
 
-impl Default for XoChipScreen {
+impl Default for Box<XoChipScreen> {
     fn default() -> Self {
-        Self {
-            data: bytemuck::zeroed_box(),
-            enabled_planes: [false, false, false, true],
-            hires: false,
-        }
+        let mut screen: Box<XoChipScreen> = bytemuck::zeroed_box();
+        screen.enabled_planes = [false, false, false, true];
+        screen
     }
 }
 
@@ -47,7 +47,7 @@ impl Screen for XoChipScreen {
 
     fn clear(&mut self) {
         for plane in self.iter_enabled_planes() {
-            *plane = [0; 64];
+            bytemuck::fill_zeroes(plane);
         }
     }
 

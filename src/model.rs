@@ -1,18 +1,15 @@
 use std::fmt::Display;
 
-use rand::SeedableRng;
-
 use crate::{
-    hardware::KeyEvent,
+    hardware::{Chip8, KeyEvent, Machine},
     instruction::InstructionSet,
-    screen::{self, DynamicScreen},
+    screen::{
+        self, CosmacVipScreen, DynamicScreen, LegacySuperChipScreen, ModernSuperChipScreen, Screen,
+        XoChipScreen,
+    },
 };
 
-pub trait Model {
-    type Screen: screen::Screen;
-    type Rng: rand::Rng;
-    fn init_screen(&self) -> Self::Screen;
-    fn init_rng(&self) -> Self::Rng;
+pub trait Model: Send + Sync {
     fn memory_size(&self) -> usize {
         0x1000
     }
@@ -71,6 +68,24 @@ impl DrawWaitSetting {
     }
 }
 
+impl Model for Box<dyn Model> {
+    fn memory_size(&self) -> usize {
+        self.as_ref().memory_size()
+    }
+
+    fn instruction_set(&self) -> InstructionSet {
+        self.as_ref().instruction_set()
+    }
+
+    fn quirks(&self) -> &Quirks {
+        self.as_ref().quirks()
+    }
+
+    fn default_framerate(&self) -> f64 {
+        self.as_ref().default_framerate()
+    }
+}
+
 macro_rules! dynamic_model_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
@@ -110,22 +125,6 @@ impl Display for DynamicModel {
 }
 
 impl Model for DynamicModel {
-    type Screen = DynamicScreen;
-    type Rng = Box<dyn rand::RngCore>;
-
-    fn init_screen(&self) -> Self::Screen {
-        match self {
-            Self::CosmacVip(_) => DynamicScreen::CosmacVip(Default::default()),
-            Self::LegacySuperChip(_) => DynamicScreen::LegacySuperChip(Default::default()),
-            Self::ModernSuperChip(_) => DynamicScreen::ModernSuperChip(Default::default()),
-            Self::XoChip(_) => DynamicScreen::XoChip(Default::default()),
-        }
-    }
-
-    fn init_rng(&self) -> Self::Rng {
-        Box::new(rand_xoshiro::Xoshiro256PlusPlus::from_os_rng())
-    }
-
     dynamic_model_method!(memory_size(self: &Self) -> usize);
     dynamic_model_method!(instruction_set(self: &Self) -> InstructionSet);
     dynamic_model_method!(quirks(self: &Self) -> &Quirks);
@@ -155,6 +154,44 @@ impl DynamicModel {
             Self::XoChip(_) => XoChip::QUIRKS,
         }
     }
+
+    pub fn into_dyn_model_machine(self, rom: &[u8]) -> Chip8<Box<dyn Model>, dyn Screen> {
+        match self {
+            Self::CosmacVip(model) => {
+                Chip8::new(Box::new(model), Box::<CosmacVipScreen>::default(), rom)
+            }
+            Self::LegacySuperChip(model) => Chip8::new(
+                Box::new(model),
+                Box::<LegacySuperChipScreen>::default(),
+                rom,
+            ),
+            Self::ModernSuperChip(model) => Chip8::new(
+                Box::new(model),
+                Box::<ModernSuperChipScreen>::default(),
+                rom,
+            ),
+            Self::XoChip(model) => Chip8::new(Box::new(model), Box::<XoChipScreen>::default(), rom),
+        }
+    }
+
+    pub fn into_dyn_machine(self, rom: &[u8]) -> Box<dyn Machine> {
+        match self {
+            Self::CosmacVip(model) => {
+                Box::new(Chip8::new(model, Box::<CosmacVipScreen>::default(), rom))
+            }
+            Self::LegacySuperChip(model) => Box::new(Chip8::new(
+                model,
+                Box::<LegacySuperChipScreen>::default(),
+                rom,
+            )),
+            Self::ModernSuperChip(model) => Box::new(Chip8::new(
+                model,
+                Box::<ModernSuperChipScreen>::default(),
+                rom,
+            )),
+            Self::XoChip(model) => Box::new(Chip8::new(model, Box::<XoChipScreen>::default(), rom)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,17 +218,6 @@ impl Default for CosmacVip {
 }
 
 impl Model for CosmacVip {
-    type Screen = screen::CosmacVipScreen;
-    type Rng = rand_xoshiro::Xoshiro256PlusPlus;
-
-    fn init_screen(&self) -> Self::Screen {
-        Default::default()
-    }
-
-    fn init_rng(&self) -> Self::Rng {
-        Self::Rng::from_os_rng()
-    }
-
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::CosmacVip
     }
@@ -225,17 +251,6 @@ impl Default for LegacySuperChip {
 }
 
 impl Model for LegacySuperChip {
-    type Screen = screen::LegacySuperChipScreen;
-    type Rng = rand_xoshiro::Xoshiro256PlusPlus;
-
-    fn init_screen(&self) -> Self::Screen {
-        Default::default()
-    }
-
-    fn init_rng(&self) -> Self::Rng {
-        Self::Rng::from_os_rng()
-    }
-
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::SuperChip
     }
@@ -273,17 +288,6 @@ impl Default for ModernSuperChip {
 }
 
 impl Model for ModernSuperChip {
-    type Screen = screen::ModernSuperChipScreen;
-    type Rng = rand_xoshiro::Xoshiro256PlusPlus;
-
-    fn init_screen(&self) -> Self::Screen {
-        Default::default()
-    }
-
-    fn init_rng(&self) -> Self::Rng {
-        Self::Rng::from_os_rng()
-    }
-
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::SuperChip
     }
@@ -317,17 +321,6 @@ impl Default for XoChip {
 }
 
 impl Model for XoChip {
-    type Screen = screen::XoChipScreen;
-    type Rng = rand_xoshiro::Xoshiro256PlusPlus;
-
-    fn init_screen(&self) -> Self::Screen {
-        Default::default()
-    }
-
-    fn init_rng(&self) -> Self::Rng {
-        Self::Rng::from_os_rng()
-    }
-
     fn memory_size(&self) -> usize {
         0x10000
     }

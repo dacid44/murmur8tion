@@ -1,12 +1,15 @@
 use arbitrary_int::{u12, u4};
 use bitbybit::bitfield;
+use tracing::info_span;
 
 macro_rules! match_ux {
     ($type:path; $match_type:ident; $max:literal; $x: expr; $name: ident; $($match:tt)*) => {
         {
             let $name: $type = $x;
+            const UNREACHABLE_START: $match_type = ::arbitrary_int::UInt::value(<$type as ::arbitrary_int::Number>::MAX) + 1;
             match $match_type::from($name) {
-                $max.. => unreachable!(),
+                // UNREACHABLE_START.. => unsafe { ::std::hint::unreachable_unchecked() },
+                UNREACHABLE_START => unreachable!(),
                 $($match)*
             }
         }
@@ -130,11 +133,13 @@ pub enum XoChipInstruction {
 }
 
 impl Instruction {
+    #[inline(always)]
     pub fn from_u16(instruction: u16, instruction_set: InstructionSet) -> Option<Self> {
         use Instruction::SuperChip as Sc;
         use Instruction::XoChip as Xc;
         use SuperChipInstruction as Sci;
         use XoChipInstruction as Xci;
+        // let span = info_span!("Instruction::from_u16", name = "Instruction::from_u16").entered();
 
         let instruction = RawInstruction::new_with_raw_value(instruction);
         Some(match_u4! {instruction.discriminant1();

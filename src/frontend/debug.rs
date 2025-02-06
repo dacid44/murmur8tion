@@ -7,6 +7,8 @@ use bevy_egui::{
 };
 use bevy_inspector_egui::bevy_inspector;
 
+use crate::hardware::Machine as HardwareMachine;
+
 use super::{layout::ScaleToDisplay, machine::Machine, ui::style, Frame, FRAME_ASPECT_RATIO};
 
 #[derive(Resource, Clone, Default)]

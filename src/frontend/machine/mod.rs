@@ -1,7 +1,8 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Instant};
 
 use arbitrary_int::u4;
 use bevy::{
+    diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic},
     input::{keyboard::KeyboardInput, ButtonState},
     prelude::*,
     render::render_resource::Extent3d,
@@ -10,31 +11,37 @@ use image::RgbaImage;
 use keymap::KeyMapping;
 
 use crate::{
-    hardware::{DynamicMachine, KeyEvent},
+    hardware::{self, Chip8, DynamicMachine, KeyEvent, Machine as HardwareMachine},
     model::{DynamicModel, Model},
+    screen::Screen,
 };
 
 use super::{audio::Chip8Audio, rom::Rom, EmulatorData, EmulatorEvent, Frame};
 
 mod keymap;
 
+pub const FRAME_TICK_TIME: DiagnosticPath = DiagnosticPath::const_new("frame_tick_time");
+
 #[derive(Resource)]
 pub struct Machine {
     pub machine: DynamicMachine,
-    queued_inputs: VecDeque<(u4, KeyEvent)>,
+    // pub machine: Box<dyn hardware::Machine>,
+    queued_inputs: Vec<(u4, KeyEvent)>,
 }
 
 impl Machine {
     fn new(model: DynamicModel, rom: &[u8]) -> Self {
         Self {
             machine: DynamicMachine::new(model, rom),
-            queued_inputs: VecDeque::new(),
+            // machine: model.into_dyn_machine(rom),
+            queued_inputs: Vec::new(),
         }
     }
 }
 
 pub fn machine_plugin(app: &mut App) {
     app.init_resource::<KeyMapping>()
+        .register_diagnostic(Diagnostic::new(FRAME_TICK_TIME))
         .add_systems(
             PostUpdate,
             handle_ui_events.run_if(on_event::<EmulatorEvent>),
@@ -99,27 +106,35 @@ fn machine_system(
     ui_data: Res<EmulatorData>,
     mut frame: ResMut<Frame>,
     mut images: ResMut<Assets<Image>>,
+    mut diagnostics: Diagnostics,
 ) {
     if ui_data.paused {
         return;
     }
+
+    let t0 = Instant::now();
 
     let image = images
         .get_mut(&frame.handle)
         .expect("Emulator frame not found");
     frame.size = write_frame(image, machine.machine.render_frame(&ui_data.palette));
 
-    for _ in 0..(ui_data.cycles_per_frame) {
-        if let Some((key, event)) = machine.queued_inputs.pop_front() {
-            machine.machine.event(key, event);
-        }
-        if let Err(error) = machine.machine.tick() {
-            error!("Emulator error: {error}");
-            frame.size = write_frame(image, machine.machine.render_frame(&ui_data.palette));
-            commands.remove_resource::<Machine>();
-            return;
-        }
+    let Machine {
+        machine,
+        queued_inputs,
+    } = machine.as_mut();
+    for (key, event) in queued_inputs.drain(..) {
+        machine.event(key, event);
     }
+    if let Err(error) = machine.tick_many(ui_data.cycles_per_frame) {
+        error!("Emulator error: {error}");
+        frame.size = write_frame(image, machine.render_frame(&ui_data.palette));
+        commands.remove_resource::<Machine>();
+        return;
+    }
+
+    let t1 = Instant::now();
+    diagnostics.add_measurement(&FRAME_TICK_TIME, || (t1 - t0).as_millis() as f64);
 }
 
 fn machine_audio(

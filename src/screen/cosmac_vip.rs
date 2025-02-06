@@ -1,12 +1,19 @@
 use std::ops::BitOr;
 
 use bevy::log::info_span;
+use bytemuck::Zeroable;
 use image::RgbaImage;
 
 use super::{draw_line_clipping, screen_to_image, Palette, Screen};
 
-#[derive(Default)]
-pub struct CosmacVipScreen(Box<[u64; 32]>);
+#[derive(Zeroable)]
+pub struct CosmacVipScreen([u64; 32]);
+
+impl Default for Box<CosmacVipScreen> {
+    fn default() -> Self {
+        bytemuck::zeroed_box()
+    }
+}
 
 impl CosmacVipScreen {
     pub const WIDTH: u8 = 64;
@@ -23,7 +30,7 @@ impl Screen for CosmacVipScreen {
     }
 
     fn clear(&mut self) {
-        self.0 = Default::default();
+        bytemuck::fill_zeroes(&mut self.0);
     }
 
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {

@@ -1,18 +1,24 @@
 use std::{
+    collections::VecDeque,
     fmt::Display,
     ops::{Bound, RangeBounds},
+    slice::SliceIndex,
 };
 
 use arbitrary_int::{u4, Number};
 use bevy::log::{info_span, warn};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
 use thiserror::Error;
 
 use crate::{
     frontend::audio::DEFAULT_PATTERN,
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction, XoChipInstruction},
-    model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip, XoChip},
-    screen::{self, Palette, Screen},
+    model::{self, CosmacVip, DynamicModel, LegacySuperChip, Model, ModernSuperChip, XoChip},
+    screen::{
+        self, CosmacVipScreen, LegacySuperChipScreen, ModernSuperChipScreen, Palette, Screen,
+        XoChipScreen,
+    },
 };
 
 #[derive(Error, Debug)]
@@ -29,15 +35,63 @@ pub enum Error {
     StackFull,
     #[error("an invalid memory range was accessed (range {0:#X?} of memory size {1:#X})")]
     InvalidMemoryRange((Bound<usize>, Bound<usize>), usize),
+    #[error("an invalid exact memory range was accessed (address {address:#X} of length {length:#X} in memory size {memory_size:#X}")]
+    InvalidExactMemoryRange {
+        address: usize,
+        length: usize,
+        memory_size: usize,
+    },
     #[error("an unsupported screen operation was run")]
     UnsupportedScreenOperation(#[from] screen::UnsupportedScreenOperation),
+}
+
+pub trait Machine: Send + Sync {
+    fn event(&mut self, key: u4, event: KeyEvent);
+    fn render_frame(&mut self, palette: &Palette) -> image::RgbaImage;
+    fn sound_active(&self) -> bool;
+    fn pitch(&self) -> u8;
+    fn audio_pattern(&self) -> &[u8; 16];
+    fn memory(&self) -> &[u8];
+    fn tick(&mut self) -> Result<bool>;
+    fn tick_many(&mut self, count: u32) -> Result<bool> {
+        for _ in 0..count {
+            self.tick()?;
+            // coz::progress!("machine_tick")
+            // if self.tick()? {
+            //     return Ok(true)
+            // }
+        }
+        Ok(false)
+    }
+}
+
+macro_rules! blanket_machine_method {
+    ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
+            Chip8::$name(self$(, $param)*)
+        }
+    }
+}
+
+impl<Model, Screen> Machine for Chip8<Model, Screen>
+where
+    Model: model::Model,
+    Screen: screen::Screen,
+{
+    blanket_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
+    blanket_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
+    blanket_machine_method!(sound_active(self: &Self) -> bool);
+    blanket_machine_method!(pitch(self: &Self) -> u8);
+    blanket_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
+    blanket_machine_method!(memory(self: &Self) -> &[u8]);
+    blanket_machine_method!(tick(self: &mut Self) -> Result<bool>);
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! dynamic_machine_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
-        pub fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
+        fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
                 Self::CosmacVip(machine) => Chip8::$name(machine$(, $param)*),
                 Self::LegacySuperChip(machine) => Chip8::$name(machine$(, $param)*),
@@ -49,38 +103,48 @@ macro_rules! dynamic_machine_method {
 }
 
 pub enum DynamicMachine {
-    CosmacVip(Chip8<CosmacVip>),
-    LegacySuperChip(Chip8<LegacySuperChip>),
-    ModernSuperChip(Chip8<ModernSuperChip>),
-    XoChip(Chip8<XoChip>),
+    CosmacVip(Chip8<CosmacVip, CosmacVipScreen>),
+    LegacySuperChip(Chip8<LegacySuperChip, LegacySuperChipScreen>),
+    ModernSuperChip(Chip8<ModernSuperChip, ModernSuperChipScreen>),
+    XoChip(Chip8<XoChip, XoChipScreen>),
 }
 
 impl DynamicMachine {
     pub fn new(model: DynamicModel, rom: &[u8]) -> Self {
         match model {
-            DynamicModel::CosmacVip(model) => Self::new_cosmac_vip(rom, model),
-            DynamicModel::LegacySuperChip(model) => Self::new_legacy_schip(rom, model),
-            DynamicModel::ModernSuperChip(model) => Self::new_modern_schip(rom, model),
-            DynamicModel::XoChip(model) => Self::new_xochip(rom, model),
+            DynamicModel::CosmacVip(model) => Self::new_cosmac_vip(model, rom),
+            DynamicModel::LegacySuperChip(model) => Self::new_legacy_schip(model, rom),
+            DynamicModel::ModernSuperChip(model) => Self::new_modern_schip(model, rom),
+            DynamicModel::XoChip(model) => Self::new_xochip(model, rom),
         }
     }
 
-    pub fn new_cosmac_vip(rom: &[u8], model: CosmacVip) -> Self {
-        Self::CosmacVip(Chip8::new(model, rom))
+    pub fn new_cosmac_vip(model: CosmacVip, rom: &[u8]) -> Self {
+        Self::CosmacVip(Chip8::new(model, Box::<CosmacVipScreen>::default(), rom))
     }
 
-    pub fn new_legacy_schip(rom: &[u8], model: LegacySuperChip) -> Self {
-        Self::LegacySuperChip(Chip8::new(model, rom))
+    pub fn new_legacy_schip(model: LegacySuperChip, rom: &[u8]) -> Self {
+        Self::LegacySuperChip(Chip8::new(
+            model,
+            Box::<LegacySuperChipScreen>::default(),
+            rom,
+        ))
     }
 
-    pub fn new_modern_schip(rom: &[u8], model: ModernSuperChip) -> Self {
-        Self::ModernSuperChip(Chip8::new(model, rom))
+    pub fn new_modern_schip(model: ModernSuperChip, rom: &[u8]) -> Self {
+        Self::ModernSuperChip(Chip8::new(
+            model,
+            Box::<ModernSuperChipScreen>::default(),
+            rom,
+        ))
     }
 
-    pub fn new_xochip(rom: &[u8], model: XoChip) -> Self {
-        Self::XoChip(Chip8::new(model, rom))
+    pub fn new_xochip(model: XoChip, rom: &[u8]) -> Self {
+        Self::XoChip(Chip8::new(model, Box::<XoChipScreen>::default(), rom))
     }
+}
 
+impl Machine for DynamicMachine {
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
     dynamic_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
     dynamic_machine_method!(sound_active(self: &Self) -> bool);
@@ -88,6 +152,7 @@ impl DynamicMachine {
     dynamic_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
     dynamic_machine_method!(memory(self: &Self) -> &[u8]);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
+    dynamic_machine_method!(tick_many(self: &mut Self, count: u32) -> Result<bool>);
 }
 
 struct Cpu {
@@ -188,7 +253,7 @@ impl Cpu {
 struct Keypad {
     keys: u16,
     waiting: bool,
-    event: Option<(u4, KeyEvent)>,
+    event: Option<u4>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,7 +272,7 @@ impl Display for KeyEvent {
 }
 
 impl Keypad {
-    fn event(&mut self, key: u4, event: KeyEvent) {
+    fn event(&mut self, key: u4, event: KeyEvent, test_event: KeyEvent) {
         let was_pressed = self.keys & 1 << u8::from(key) != 0;
         let record_event = match event {
             KeyEvent::Press => {
@@ -219,18 +284,18 @@ impl Keypad {
                 was_pressed
             }
         };
-        if record_event {
-            self.event = Some((key, event));
+        if record_event && event == test_event {
+            self.event = Some(self.event.unwrap_or(key).min(key));
         }
     }
 
-    fn test_event(&mut self, event: KeyEvent) -> Option<u4> {
+    fn test_event(&mut self) -> Option<u4> {
         match (self.waiting, self.event) {
-            (true, Some((key, kind))) if kind == event => {
+            (true, Some(key)) => {
                 self.waiting = false;
                 Some(key)
             }
-            (true, _) => None,
+            (true, None) => None,
             (false, _) => {
                 self.waiting = true;
                 self.event = None;
@@ -244,21 +309,21 @@ impl Keypad {
     }
 }
 
-pub struct Chip8<Model: model::Model> {
+pub struct Chip8<Model: model::Model, Screen: screen::Screen + ?Sized> {
     model: Model,
     keypad: Keypad,
     cpu: Cpu,
     memory: Box<[u8]>,
-    screen: Model::Screen,
-    rng: Model::Rng,
+    screen: Box<Screen>,
+    rng: Xoshiro256PlusPlus,
     vblank: bool,
     rpl: [u8; 16],
     pitch: u8,
     audio_pattern: [u8; 16],
 }
 
-impl<Model: model::Model> Chip8<Model> {
-    pub fn new(model: Model, rom: &[u8]) -> Self {
+impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> {
+    pub fn new(model: Model, screen: Box<Screen>, rom: &[u8]) -> Self {
         let memory_size = model.memory_size();
         let mut memory = bytemuck::zeroed_slice_box(memory_size);
         let font_slice: &[u8] = screen::FONT.as_flattened();
@@ -274,15 +339,13 @@ impl<Model: model::Model> Chip8<Model> {
             warn!("ROM is too big to completely load into memory");
             memory[0x200..].copy_from_slice(&rom[..memory_size - 0x200]);
         }
-        let screen = model.init_screen();
-        let rng = model.init_rng();
         Self {
             keypad: Default::default(),
             model,
             cpu: Default::default(),
             memory,
             screen,
-            rng,
+            rng: Xoshiro256PlusPlus::from_os_rng(),
             vblank: false,
             rpl: [0; 16],
             pitch: 64,
@@ -291,7 +354,8 @@ impl<Model: model::Model> Chip8<Model> {
     }
 
     pub fn event(&mut self, key: u4, event: KeyEvent) {
-        self.keypad.event(key, event)
+        self.keypad
+            .event(key, event, self.model.quirks().key_wait_trigger)
     }
 
     pub fn render_frame(&mut self, palette: &Palette) -> image::RgbaImage {
@@ -321,19 +385,29 @@ impl<Model: model::Model> Chip8<Model> {
         &self.memory
     }
 
-    fn mem_slice(&self, range: impl RangeBounds<usize>) -> Result<&[u8]> {
-        let range = (range.start_bound().cloned(), range.end_bound().cloned());
-        self.memory
-            .get(range)
-            .ok_or(Error::InvalidMemoryRange(range, self.memory.len()))
+    fn mem_slice<R>(&self, range: R) -> Result<&[u8]>
+    where
+        R: SliceIndex<[u8], Output = [u8]> + RangeBounds<usize> + Clone,
+    {
+        self.memory.get(range.clone()).ok_or_else(|| {
+            Error::InvalidMemoryRange(
+                (range.start_bound().cloned(), range.end_bound().cloned()),
+                self.memory.len(),
+            )
+        })
     }
 
-    fn mem_slice_mut(&mut self, range: impl RangeBounds<usize>) -> Result<&mut [u8]> {
-        let range = (range.start_bound().cloned(), range.end_bound().cloned());
+    fn mem_slice_mut<R>(&mut self, range: R) -> Result<&mut [u8]>
+    where
+        R: SliceIndex<[u8], Output = [u8]> + RangeBounds<usize> + Clone,
+    {
         let memory_len = self.memory.len();
-        self.memory
-            .get_mut(range)
-            .ok_or(Error::InvalidMemoryRange(range, memory_len))
+        self.memory.get_mut(range.clone()).ok_or_else(|| {
+            Error::InvalidMemoryRange(
+                (range.start_bound().cloned(), range.end_bound().cloned()),
+                memory_len,
+            )
+        })
     }
 
     fn draw_wait_for_vblank(&self) -> bool {
@@ -367,7 +441,10 @@ impl<Model: model::Model> Chip8<Model> {
 
         // let span = info_span!("Chip8::tick", name = "Chip8::tick").entered();
 
-        let raw_instruction = self.read_word()?;
+        let word = self.read_word()?;
+        // puffin::profile_function!(format!("{word:#06X}"));
+
+        let raw_instruction = word;
         let instruction = Instruction::from_u16(raw_instruction, self.model.instruction_set())
             .ok_or(Error::InvalidInstruction(raw_instruction))?;
         self.cpu.inc_pc()?;
@@ -415,7 +492,7 @@ impl<Model: model::Model> Chip8<Model> {
             I::LdFromDt { x } => self.cpu.set_v(x, self.cpu.dt),
             I::LdSt { x } => self.cpu.st = self.cpu.get_v(x),
             I::LdFromKey { x } => {
-                if let Some(key) = self.keypad.test_event(self.model.quirks().key_wait_trigger) {
+                if let Some(key) = self.keypad.test_event() {
                     self.cpu.set_v(x, u8::from(key));
                 } else {
                     self.cpu.dec_pc();

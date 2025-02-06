@@ -8,8 +8,7 @@ use widgets::{edit_quirks, model_selector, palette_editor};
 use crate::model::{self, Model};
 
 use super::{
-    debug::{show_debug_options, DebugOptions},
-    EmulatorData, EmulatorEvent,
+    debug::{show_debug_options, DebugOptions}, machine::FRAME_TICK_TIME, EmulatorData, EmulatorEvent
 };
 
 pub mod style;
@@ -28,10 +27,16 @@ pub fn draw_main_ui(
     mut debug_options: ResMut<DebugOptions>,
 ) {
     ui.0.label(format!(
-        "FPS: {}",
+        "FPS: {:.1}",
         diagnostics
             .get(&FrameTimeDiagnosticsPlugin::FPS)
-            .and_then(|fps| fps.smoothed())
+            .and_then(|fps| fps.average())
+            .unwrap_or(0.0)
+    ));
+    ui.0.label(format!(
+        "Frame millis: {:.2}",
+        diagnostics.get(&FRAME_TICK_TIME)
+            .and_then(|time| time.average())
             .unwrap_or(0.0)
     ));
 
@@ -79,7 +84,7 @@ pub fn draw_main_ui(
             };
 
             ui.add(
-                egui::Slider::new(&mut emulator_data.cycles_per_frame, 1..=1000000)
+                egui::Slider::new(&mut emulator_data.cycles_per_frame, 1..=10000000)
                     .logarithmic(true)
                     .text("Cycles per frame"),
             );

@@ -10,6 +10,7 @@ use std::{
 };
 
 use arbitrary_int::u4;
+use bytemuck::Zeroable;
 use image::{Rgba, RgbaImage};
 use num_traits::PrimInt;
 use thiserror::Error;
@@ -81,7 +82,7 @@ pub enum UnsupportedScreenOperation {
 
 type Result<T, E = UnsupportedScreenOperation> = std::result::Result<T, E>;
 
-pub trait Screen {
+pub trait Screen: Send + Sync {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
@@ -129,11 +130,65 @@ macro_rules! screen_method {
     }
 }
 
+#[repr(u8)]
+#[derive(Zeroable)]
+#[allow(clippy::large_enum_variant)]
 pub enum DynamicScreen {
-    CosmacVip(CosmacVipScreen),
-    LegacySuperChip(LegacySuperChipScreen),
-    ModernSuperChip(ModernSuperChipScreen),
-    XoChip(XoChipScreen),
+    CosmacVip(CosmacVipScreen) = 0,
+    LegacySuperChip(LegacySuperChipScreen) = 1,
+    ModernSuperChip(ModernSuperChipScreen) = 2,
+    XoChip(XoChipScreen) = 3,
+}
+
+impl DynamicScreen {
+    fn new_with_discriminant(discriminant: u8) -> Box<Self> {
+        if !(0..=3).contains(&discriminant) {
+            panic!("Invalid discriminant for DynamicScreen: {}", discriminant);
+        }
+
+        let mut screen: Box<DynamicScreen> = bytemuck::zeroed_box();
+        // SAFETY: All possible payloads are zeroable and we have verified that the discriminant is valid
+        unsafe {
+            let discriminant_ptr = (screen.as_mut() as *mut DynamicScreen).cast::<u8>();
+            *discriminant_ptr = discriminant;
+        }
+
+        if let DynamicScreen::XoChip(xo_chip) = screen.as_mut() {
+            let _ = xo_chip.set_planes(u4::new(0b0001));
+        }
+
+        screen
+    }
+
+    pub fn new_cosmac_vip() -> Box<Self> {
+        Self::new_with_discriminant(0)
+    }
+
+    pub fn new_legacy_super_chip() -> Box<Self> {
+        Self::new_with_discriminant(1)
+    }
+
+    pub fn new_modern_super_chip() -> Box<Self> {
+        Self::new_with_discriminant(2)
+    }
+
+    pub fn new_xochip() -> Box<Self> {
+        Self::new_with_discriminant(3)
+    }
+}
+
+#[test]
+fn test_new_dynamic_screen() {
+    assert!(matches!(DynamicScreen::new_with_discriminant(0).as_ref(), DynamicScreen::CosmacVip(_)));
+    assert!(matches!(DynamicScreen::new_with_discriminant(1).as_ref(), DynamicScreen::LegacySuperChip(_)));
+    assert!(matches!(DynamicScreen::new_with_discriminant(2).as_ref(), DynamicScreen::ModernSuperChip(_)));
+    assert!(matches!(DynamicScreen::new_with_discriminant(3).as_ref(), DynamicScreen::XoChip(_)));
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_dynamic_screen() {
+    DynamicScreen::new_with_discriminant(4);
 }
 
 impl Screen for DynamicScreen {
@@ -151,6 +206,36 @@ impl Screen for DynamicScreen {
     screen_method!(scroll_right(self: &mut Self) -> Result<()>);
     screen_method!(scroll_left(self: &mut Self) -> Result<()>);
     screen_method!(to_image(self: &Self, palette: &Palette) -> RgbaImage);
+}
+
+macro_rules! dyn_screen_method {
+    ($name:ident(self: &Self$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        fn $name(&self$(, $param: $ptype)*)$( -> $ret)? {
+            Screen::$name(self.as_ref()$(, $param)*)
+        }
+    };
+    ($name:ident(self: &mut Self$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        fn $name(&mut self$(, $param: $ptype)*)$( -> $ret)? {
+            Screen::$name(self.as_mut()$(, $param)*)
+        }
+    };
+}
+
+impl Screen for Box<dyn Screen> {
+    dyn_screen_method!(width(self: &Self) -> u8);
+    dyn_screen_method!(height(self: &Self) -> u8);
+    dyn_screen_method!(clear(self: &mut Self));
+    dyn_screen_method!(get_hires(self: &Self) -> bool);
+    dyn_screen_method!(set_hires(self: &mut Self, hires: bool) -> Result<()>);
+    dyn_screen_method!(set_planes(self: &mut Self, planes: u4) -> Result<()>);
+    dyn_screen_method!(num_active_planes(self: &Self) -> usize);
+    dyn_screen_method!(draw_sprite(self: &mut Self, x: u8, y: u8, sprite: &[u8]) -> bool);
+    dyn_screen_method!(draw_large_sprite(self: &mut Self, x: u8, y: u8, sprite: &[[u8; 32]]) -> Result<u8>);
+    dyn_screen_method!(scroll_down(self: &mut Self, amount: u4) -> Result<()>);
+    dyn_screen_method!(scroll_up(self: &mut Self, amount: u4) -> Result<()>);
+    dyn_screen_method!(scroll_right(self: &mut Self) -> Result<()>);
+    dyn_screen_method!(scroll_left(self: &mut Self) -> Result<()>);
+    dyn_screen_method!(to_image(self: &Self, palette: &Palette) -> RgbaImage);
 }
 
 pub const FONT_ADDRESS: usize = 0;

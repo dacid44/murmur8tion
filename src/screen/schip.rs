@@ -1,6 +1,7 @@
 use std::ops::BitOr;
 
 use arbitrary_int::u4;
+use bytemuck::Zeroable;
 use image::RgbaImage;
 
 use super::{
@@ -8,8 +9,9 @@ use super::{
     Screen,
 };
 
+#[derive(Zeroable)]
 pub struct LegacySuperChipScreen {
-    data: Box<[u128; 64]>,
+    data: [u128; 64],
     hires: bool,
 }
 
@@ -18,12 +20,9 @@ impl LegacySuperChipScreen {
     const HEIGHT: u8 = 64;
 }
 
-impl Default for LegacySuperChipScreen {
+impl Default for Box<LegacySuperChipScreen> {
     fn default() -> Self {
-        Self {
-            data: Box::new([0; 64]),
-            hires: false,
-        }
+        bytemuck::zeroed_box()
     }
 }
 
@@ -37,7 +36,7 @@ impl Screen for LegacySuperChipScreen {
     }
 
     fn clear(&mut self) {
-        self.data = Box::new([0; 64]);
+        bytemuck::fill_zeroes(&mut self.data);
     }
 
     fn get_hires(&self) -> bool {
@@ -119,8 +118,9 @@ impl Screen for LegacySuperChipScreen {
     }
 }
 
+#[derive(Zeroable)]
 pub struct ModernSuperChipScreen {
-    data: Box<[u128; 64]>,
+    data: [u128; 64],
     hires: bool,
 }
 
@@ -129,12 +129,9 @@ impl ModernSuperChipScreen {
     const HEIGHT: u8 = 64;
 }
 
-impl Default for ModernSuperChipScreen {
+impl Default for Box<ModernSuperChipScreen> {
     fn default() -> Self {
-        Self {
-            data: Box::new([0; 64]),
-            hires: false,
-        }
+        bytemuck::zeroed_box()
     }
 }
 
@@ -148,7 +145,7 @@ impl Screen for ModernSuperChipScreen {
     }
 
     fn clear(&mut self) {
-        self.data = Box::new([0; 64]);
+        bytemuck::fill_zeroes(&mut self.data);
     }
 
     fn get_hires(&self) -> bool {

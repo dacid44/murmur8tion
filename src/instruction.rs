@@ -102,7 +102,6 @@ pub enum Instruction {
     Subn { x: u4, y: u4 },
     Rnd { x: u4, kk: u8 },
     Drw { x: u4, y: u4, n: u4 },
-    // Super Chip-48 instructions after
     SuperChip(SuperChipInstruction),
     XoChip(XoChipInstruction),
 }
@@ -126,7 +125,7 @@ pub enum XoChipInstruction {
     ScrollUp { n: u4 },
     RegRangeToMem { x: u4, y: u4 },
     RegRangeFromMem { x: u4, y: u4 },
-    LdLong,
+    LdILong,
     SelectPlanes { x: u4 },
     WriteAudio,
     SetPitch { x: u4 },
@@ -142,15 +141,21 @@ impl Instruction {
         // let span = info_span!("Instruction::from_u16", name = "Instruction::from_u16").entered();
 
         let instruction = RawInstruction::new_with_raw_value(instruction);
-        Some(match_u4! {instruction.discriminant1();
-            0x0 => match_u12! {instruction.nnn(); nnn;
+        let disc1 = instruction.discriminant1();
+        let x = instruction.x();
+        let y = instruction.y();
+        let n = instruction.n();
+        let kk = instruction.kk();
+        let nnn = instruction.nnn();
+        Some(match_u4! {disc1;
+            0x0 => match_u12! {nnn;
                 0x000 => Self::Exit0,
                 0x0E0 => Self::Cls,
                 0x0EE => Self::Ret,
                 _ if instruction_set >= InstructionSet::SuperChip => match_u12! {nnn;
-                    0x0C0..=0x0CF => Sc(Sci::ScrollDown { n: instruction.n() }),
+                    0x0C0..=0x0CF => Sc(Sci::ScrollDown { n }),
                     0x0D0..=0x0DF if instruction_set >= InstructionSet::XoChip => {
-                        Xc(Xci::ScrollUp { n: instruction.n() })
+                        Xc(Xci::ScrollUp { n })
                     }
                     0x0FB => Sc(Sci::ScrollRight),
                     0x0FC => Sc(Sci::ScrollLeft),
@@ -161,64 +166,64 @@ impl Instruction {
                 },
                 _ => return None,
             },
-            0x1 => Self::Jp { nnn: instruction.nnn() },
-            0x2 => Self::Call { nnn: instruction.nnn() },
-            0x3 => Self::Se(Args::XKk { x: instruction.x(), kk: instruction.kk() }),
-            0x4 => Self::Sne(Args::XKk { x: instruction.x(), kk: instruction.kk() }),
-            0x5 if instruction.discriminant3() == u4::new(0x0) => Self::Se(Args::XY { x: instruction.x(), y: instruction.y() }),
-            0x5 => match_u4! {instruction.discriminant3();
-                0x0 => Self::Se(Args::XY { x: instruction.x(), y: instruction.y() }),
-                0x2 if instruction_set >= InstructionSet::XoChip => Xc(Xci::RegRangeToMem { x: instruction.x(), y: instruction.y() }),
-                0x3 if instruction_set >= InstructionSet::XoChip => Xc(Xci::RegRangeFromMem { x: instruction.x(), y: instruction.y() }),
+            0x1 => Self::Jp { nnn },
+            0x2 => Self::Call { nnn },
+            0x3 => Self::Se(Args::XKk { x, kk }),
+            0x4 => Self::Sne(Args::XKk { x, kk }),
+            0x5 if instruction.discriminant3() == u4::new(0x0) => Self::Se(Args::XY { x, y }),
+            0x5 => match_u4! {n;
+                0x0 => Self::Se(Args::XY { x, y }),
+                0x2 if instruction_set >= InstructionSet::XoChip => Xc(Xci::RegRangeToMem { x, y }),
+                0x3 if instruction_set >= InstructionSet::XoChip => Xc(Xci::RegRangeFromMem { x, y }),
                 _ => return None,
             },
-            0x6 => Self::Ld(Args::XKk { x: instruction.x(), kk: instruction.kk() }),
-            0x7 => Self::Add(Args::XKk { x: instruction.x(), kk: instruction.kk() }),
-            0x8 => match_u4! {instruction.discriminant3();
-                0x0 => Self::Ld(Args::XY { x: instruction.x(), y: instruction.y() }),
-                0x1 => Self::Or { x: instruction.x(), y: instruction.y() },
-                0x2 => Self::And { x: instruction.x(), y: instruction.y() },
-                0x3 => Self::Xor { x: instruction.x(), y: instruction.y() },
-                0x4 => Self::Add(Args::XY { x: instruction.x(), y: instruction.y() }),
-                0x5 => Self::Sub { x: instruction.x(), y: instruction.y() },
-                0x6 => Self::Shr { x: instruction.x(), y: instruction.y() },
-                0x7 => Self::Subn { x: instruction.x(), y: instruction.y() },
-                0xE => Self::Shl { x: instruction.x(), y: instruction.y() },
+            0x6 => Self::Ld(Args::XKk { x, kk }),
+            0x7 => Self::Add(Args::XKk { x, kk }),
+            0x8 => match_u4! {n;
+                0x0 => Self::Ld(Args::XY { x, y }),
+                0x1 => Self::Or { x, y },
+                0x2 => Self::And { x, y },
+                0x3 => Self::Xor { x, y },
+                0x4 => Self::Add(Args::XY { x, y }),
+                0x5 => Self::Sub { x, y },
+                0x6 => Self::Shr { x, y },
+                0x7 => Self::Subn { x, y },
+                0xE => Self::Shl { x, y },
                 _ => return None,
             },
-            0x9 if instruction.discriminant3() == u4::new(0x0) => Self::Sne(Args::XY { x: instruction.x(), y: instruction.y() }),
-            0xA => Self::LdI { nnn: instruction.nnn() },
-            0xB => Self::JpV0 { nnn: instruction.nnn() },
-            0xC => Self::Rnd { x: instruction.x(), kk: instruction.kk() },
-            0xD => if instruction_set >= InstructionSet::SuperChip && instruction.discriminant3() == u4::new(0x0) {
-                Sc(Sci::DrawLarge { x: instruction.x(), y: instruction.y() })
+            0x9 if n == u4::new(0x0) => Self::Sne(Args::XY { x, y }),
+            0xA => Self::LdI { nnn },
+            0xB => Self::JpV0 { nnn },
+            0xC => Self::Rnd { x, kk },
+            0xD => if instruction_set >= InstructionSet::SuperChip && n == u4::new(0x0) {
+                Sc(Sci::DrawLarge { x, y })
             } else {
-                Self::Drw { x: instruction.x(), y: instruction.y(), n: instruction.n() }
+                Self::Drw { x, y, n }
             },
-            0xE => match instruction.discriminant2() {
-                0x9E => Self::Skp { x: instruction.x() },
-                0xA1 => Self::Sknp { x: instruction.x() },
+            0xE => match kk {
+                0x9E => Self::Skp { x },
+                0xA1 => Self::Sknp { x },
                 _ => return None,
             },
-            0xF => match instruction.discriminant2() {
-                0x07 => Self::LdFromDt { x: instruction.x() },
-                0x0A => Self::LdFromKey { x: instruction.x() },
-                0x15 => Self::LdToDt { x: instruction.x() },
-                0x18 => Self::LdSt { x: instruction.x() },
-                0x1E => Self::AddI { x: instruction.x() },
-                0x29 => Self::LdF { x: instruction.x() },
-                0x33 => Self::LdB { x: instruction.x() },
-                0x55 => Self::LdToSlice { x: instruction.x() },
-                0x65 => Self::LdFromSlice { x: instruction.x() },
-                disc2 if instruction_set >= InstructionSet::SuperChip => match disc2 {
-                    0x30 => Sc(Sci::LdHiResF { x: instruction.x() }),
-                    0x75 => Sc(Sci::StoreRegs { x: instruction.x() }),
-                    0x85 => Sc(Sci::GetRegs { x: instruction.x() }),
-                    _ if instruction_set >= InstructionSet::XoChip => match disc2 {
-                        0x00 if instruction.x() == u4::new(0) => Xc(Xci::LdLong),
-                        0x01 => Xc(Xci::SelectPlanes { x: instruction.x() }),
-                        0x02 if instruction.x() == u4::new(0) => Xc(Xci::WriteAudio),
-                        0x3A => Xc(Xci::SetPitch { x: instruction.x() }),
+            0xF => match kk {
+                0x07 => Self::LdFromDt { x },
+                0x0A => Self::LdFromKey { x },
+                0x15 => Self::LdToDt { x },
+                0x18 => Self::LdSt { x },
+                0x1E => Self::AddI { x },
+                0x29 => Self::LdF { x },
+                0x33 => Self::LdB { x },
+                0x55 => Self::LdToSlice { x },
+                0x65 => Self::LdFromSlice { x },
+                _ if instruction_set >= InstructionSet::SuperChip => match kk {
+                    0x30 => Sc(Sci::LdHiResF { x }),
+                    0x75 => Sc(Sci::StoreRegs { x }),
+                    0x85 => Sc(Sci::GetRegs { x }),
+                    _ if instruction_set >= InstructionSet::XoChip => match kk {
+                        0x00 if x == u4::new(0) => Xc(Xci::LdILong),
+                        0x01 => Xc(Xci::SelectPlanes { x }),
+                        0x02 if x == u4::new(0) => Xc(Xci::WriteAudio),
+                        0x3A => Xc(Xci::SetPitch { x }),
                        _ => return None,
                     },
                     _ => return None,

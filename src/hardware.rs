@@ -698,7 +698,7 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                                 self.cpu.v[y..=x].copy_from_slice(slice);
                             }
                         }
-                        Xci::LdLong => {
+                        Xci::LdILong => {
                             let addr = self.read_word()?;
                             self.cpu.inc_pc()?;
                             self.cpu.i = addr;

@@ -69,18 +69,22 @@ impl DrawWaitSetting {
 }
 
 impl Model for Box<dyn Model> {
+    #[inline(always)]
     fn memory_size(&self) -> usize {
         self.as_ref().memory_size()
     }
 
+    #[inline(always)]
     fn instruction_set(&self) -> InstructionSet {
         self.as_ref().instruction_set()
     }
 
+    #[inline(always)]
     fn quirks(&self) -> &Quirks {
         self.as_ref().quirks()
     }
 
+    #[inline(always)]
     fn default_framerate(&self) -> f64 {
         self.as_ref().default_framerate()
     }
@@ -125,9 +129,13 @@ impl Display for DynamicModel {
 }
 
 impl Model for DynamicModel {
+    #[inline(always)]
     dynamic_model_method!(memory_size(self: &Self) -> usize);
+    #[inline(always)]
     dynamic_model_method!(instruction_set(self: &Self) -> InstructionSet);
+    #[inline(always)]
     dynamic_model_method!(quirks(self: &Self) -> &Quirks);
+    #[inline(always)]
     dynamic_model_method!(default_framerate(self: &Self) -> f64);
 }
 
@@ -218,10 +226,12 @@ impl Default for CosmacVip {
 }
 
 impl Model for CosmacVip {
+    #[inline(always)]
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::CosmacVip
     }
 
+    #[inline(always)]
     fn quirks(&self) -> &Quirks {
         &self.0
     }
@@ -251,14 +261,17 @@ impl Default for LegacySuperChip {
 }
 
 impl Model for LegacySuperChip {
+    #[inline(always)]
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::SuperChip
     }
 
+    #[inline(always)]
     fn quirks(&self) -> &Quirks {
         &self.0
     }
 
+    #[inline(always)]
     fn default_framerate(&self) -> f64 {
         64.0
     }
@@ -288,10 +301,12 @@ impl Default for ModernSuperChip {
 }
 
 impl Model for ModernSuperChip {
+    #[inline(always)]
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::SuperChip
     }
 
+    #[inline(always)]
     fn quirks(&self) -> &Quirks {
         &self.0
     }
@@ -321,14 +336,17 @@ impl Default for XoChip {
 }
 
 impl Model for XoChip {
+    #[inline(always)]
     fn memory_size(&self) -> usize {
         0x10000
     }
 
+    #[inline(always)]
     fn instruction_set(&self) -> InstructionSet {
         InstructionSet::XoChip
     }
 
+    #[inline(always)]
     fn quirks(&self) -> &Quirks {
         &self.0
     }

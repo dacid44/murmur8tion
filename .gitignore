@@ -3,3 +3,4 @@
 perf.data*
 flamegraph*
 tracing.folded
+trace-*.json

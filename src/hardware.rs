@@ -27,22 +27,28 @@ pub enum Error {
     InvalidInstruction(u16),
     #[error("encountered an instruction not supported by this CHIP-8 model ({0:?})")]
     UnsupportedInstruction(Instruction),
-    #[error("the program counter tried to add past available memory (address {0:#07X})")]
-    PcOverflow(u32),
     #[error("ret was called with no return value on the stack")]
     StackEmpty,
     #[error("call was called when the stack was full")]
     StackFull,
-    #[error("an invalid memory range was accessed (range {0:#X?} of memory size {1:#X})")]
-    InvalidMemoryRange((Bound<usize>, Bound<usize>), usize),
-    #[error("an invalid exact memory range was accessed (address {address:#X} of length {length:#X} in memory size {memory_size:#X}")]
-    InvalidExactMemoryRange {
-        address: usize,
-        length: usize,
+    #[error("an invalid memory range was accessed (range {range} of memory size {memory_size:#X})", range = format_range(*start, *offset, *inclusive))]
+    InvalidMemoryRange {
+        start: u16,
+        offset: usize,
+        inclusive: bool,
         memory_size: usize,
     },
     #[error("an unsupported screen operation was run")]
     UnsupportedScreenOperation(#[from] screen::UnsupportedScreenOperation),
+}
+
+fn format_range(start: u16, offset: usize, inclusive: bool) -> String {
+    let end = (start as usize) + offset;
+    if inclusive {
+        format!("{start:#06X}..={end:#06X}")
+    } else {
+        format!("{start:#06X}..{end:#06X}")
+    }
 }
 
 pub trait Machine: Send + Sync {
@@ -181,28 +187,33 @@ impl Default for Cpu {
 
 impl Cpu {
     fn get_v(&self, reg: u4) -> u8 {
-        self.v[u8::from(reg) as usize]
+        // SAFETY: reg is a u4 and therefore cannot be larger than 15
+        // unsafe { *self.v.get_unchecked(reg.value() as usize) }
+        self.v[reg.value() as usize]
     }
 
     fn set_v(&mut self, reg: u4, val: u8) {
-        self.v[u8::from(reg) as usize] = val;
+        // SAFETY: reg is a u4 and therefore cannot be larger than 15
+        // unsafe {
+        //     *self.v.get_unchecked_mut(reg.value() as usize) = val;
+        // }
+        self.v[reg.value() as usize] = val;
     }
 
     fn push_stack(&mut self) -> Result<()> {
-        if self.sp == u4::MAX {
-            return Err(Error::StackFull);
-        }
-        self.sp += u4::new(1);
-        self.stack[u8::from(self.sp) as usize] = self.pc;
+        self.sp = self.sp.checked_add(u4::new(1)).ok_or(Error::StackFull)?;
+        self.stack[self.sp.value() as usize] = self.pc;
         Ok(())
     }
 
     fn pop_stack(&mut self) -> Result<()> {
-        if self.sp == u4::MIN {
-            return Err(Error::StackEmpty);
+        match self.sp.checked_sub(u4::new(1)) {
+            Some(sp) => {
+                self.pc = self.stack[self.sp.value() as usize];
+                self.sp = sp;
+            }
+            None => return Err(Error::StackEmpty),
         }
-        self.pc = self.stack[u8::from(self.sp) as usize];
-        self.sp -= u4::new(1);
         Ok(())
     }
 
@@ -223,12 +234,8 @@ impl Cpu {
         }
     }
 
-    fn inc_pc(&mut self) -> Result<()> {
-        self.pc = self
-            .pc
-            .checked_add(2)
-            .ok_or(Error::PcOverflow(self.pc as u32 + 2))?;
-        Ok(())
+    fn inc_pc(&mut self) {
+        self.pc = self.pc.wrapping_add(2)
     }
 
     fn dec_pc(&mut self) {
@@ -385,31 +392,6 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
         &self.memory
     }
 
-    fn mem_slice<R>(&self, range: R) -> Result<&[u8]>
-    where
-        R: SliceIndex<[u8], Output = [u8]> + RangeBounds<usize> + Clone,
-    {
-        self.memory.get(range.clone()).ok_or_else(|| {
-            Error::InvalidMemoryRange(
-                (range.start_bound().cloned(), range.end_bound().cloned()),
-                self.memory.len(),
-            )
-        })
-    }
-
-    fn mem_slice_mut<R>(&mut self, range: R) -> Result<&mut [u8]>
-    where
-        R: SliceIndex<[u8], Output = [u8]> + RangeBounds<usize> + Clone,
-    {
-        let memory_len = self.memory.len();
-        self.memory.get_mut(range.clone()).ok_or_else(|| {
-            Error::InvalidMemoryRange(
-                (range.start_bound().cloned(), range.end_bound().cloned()),
-                memory_len,
-            )
-        })
-    }
-
     fn draw_wait_for_vblank(&self) -> bool {
         self.model
             .quirks()
@@ -421,16 +403,24 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
         if condition {
             if self.model.instruction_set() >= InstructionSet::XoChip && self.read_word()? == 0xF000
             {
-                self.cpu.inc_pc()?;
+                self.cpu.inc_pc();
             }
-            self.cpu.inc_pc()?;
+            self.cpu.inc_pc();
         }
         Ok(())
     }
 
     fn read_word(&self) -> Result<u16> {
-        let data = self.mem_slice(self.cpu.pc as usize..self.cpu.pc as usize + 2)?;
-        Ok(u16::from_be_bytes(data.try_into().unwrap()))
+        let pc = self.cpu.pc as usize;
+        match (self.memory.get(pc), self.memory.get(pc.wrapping_add(1))) {
+            (Some(high), Some(low)) => Ok(u16::from_be_bytes([*high, *low])),
+            _ => Err(Error::InvalidMemoryRange {
+                start: self.cpu.pc,
+                offset: 2,
+                inclusive: false,
+                memory_size: self.memory.len(),
+            }),
+        }
     }
 
     // Returns a boolean specifying whether to exit
@@ -449,7 +439,7 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
         // puffin::profile_function!(format!("{word:#06X}"));
 
         let raw_instruction = word;
-        self.cpu.inc_pc()?;
+        self.cpu.inc_pc();
 
         let [disc1, y_u8] = ((raw_instruction & 0xF0F0) >> 4).to_be_bytes();
         let [x_u8, n_u8] = (raw_instruction & 0x0F0F).to_be_bytes();
@@ -536,31 +526,29 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
             (0x5, _, _, 0x2, IsXc) => {
                 let x_usize = u8::from(x) as usize;
                 let y_usize = u8::from(y) as usize;
-                let mut data = [0; 16];
-                let slice = &mut data[..=x_usize.abs_diff(y_usize)];
+                let mem_slice = mem_slice_inclusive_mut(
+                    &mut self.memory,
+                    self.cpu.i,
+                    x_usize.abs_diff(y_usize),
+                )?;
                 if y_usize >= x_usize {
-                    slice.copy_from_slice(&self.cpu.v[x_usize..=y_usize]);
+                    mem_slice.copy_from_slice(&self.cpu.v[x_usize..=y_usize]);
                 } else {
-                    slice.copy_from_slice(&self.cpu.v[y_usize..=x_usize]);
-                    slice.reverse();
+                    mem_slice.copy_from_slice(&self.cpu.v[y_usize..=x_usize]);
+                    mem_slice.reverse();
                 }
-                self.mem_slice_mut(self.cpu.i as usize..self.cpu.i as usize + slice.len())?
-                    .copy_from_slice(slice);
                 Xc(Xci::RegRangeToMem { x, y })
             }
             (0x5, _, _, 0x3, IsXc) => {
                 let x_usize = u8::from(x) as usize;
                 let y_usize = u8::from(y) as usize;
-                let mut data = [0; 16];
-                let slice = &mut data[..=x_usize.abs_diff(y_usize)];
-                slice.copy_from_slice(
-                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
-                );
+                let mem_slice =
+                    mem_slice_inclusive(&self.memory, self.cpu.i, x_usize.abs_diff(y_usize))?;
                 if y_usize >= x_usize {
-                    self.cpu.v[x_usize..=y_usize].copy_from_slice(slice);
+                    self.cpu.v[x_usize..=y_usize].copy_from_slice(mem_slice);
                 } else {
-                    slice.reverse();
-                    self.cpu.v[y_usize..=x_usize].copy_from_slice(slice);
+                    self.cpu.v[y_usize..=x_usize].copy_from_slice(mem_slice);
+                    self.cpu.v[y_usize..=x_usize].reverse();
                 }
                 Xc(Xci::RegRangeFromMem { x, y })
             }
@@ -679,22 +667,24 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                     let x_val = self.cpu.get_v(x);
                     let y_val = self.cpu.get_v(y);
                     if self.model.quirks().lores_draw_large_as_small && !self.screen.get_hires() {
-                        let mut data = [0; 64];
-                        let slice = &mut data[..16 * self.screen.num_active_planes()];
-                        slice.copy_from_slice(
-                            self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
-                        );
-                        self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
+                        self.cpu.v[0xF] = self.screen.draw_sprite(
+                            x_val,
+                            y_val,
+                            mem_slice(
+                                &self.memory,
+                                self.cpu.i,
+                                16 * self.screen.num_active_planes(),
+                            )?,
+                        ) as u8;
                     } else {
-                        let mut data = [0; 128];
-                        let slice = &mut data[..32 * self.screen.num_active_planes()];
-                        slice.copy_from_slice(
-                            self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
-                        );
                         self.cpu.v[0xF] = self.screen.draw_large_sprite(
                             x_val,
                             y_val,
-                            bytemuck::cast_slice(slice),
+                            bytemuck::cast_slice(mem_slice(
+                                &self.memory,
+                                self.cpu.i,
+                                32 * self.screen.num_active_planes(),
+                            )?),
                         )?;
                     }
                 }
@@ -706,12 +696,15 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                 } else {
                     let x_val = self.cpu.get_v(x);
                     let y_val = self.cpu.get_v(y);
-                    let mut data = [0; 64];
-                    let slice = &mut data[..u8::from(n) as usize * self.screen.num_active_planes()];
-                    slice.copy_from_slice(
-                        self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
-                    );
-                    self.cpu.v[0xF] = self.screen.draw_sprite(x_val, y_val, slice) as u8;
+                    self.cpu.v[0xF] = self.screen.draw_sprite(
+                        x_val,
+                        y_val,
+                        mem_slice(
+                            &self.memory,
+                            self.cpu.i,
+                            n_u8 as usize * self.screen.num_active_planes(),
+                        )?,
+                    ) as u8;
                 }
                 I::Drw { x, y, n }
             }
@@ -725,7 +718,7 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
             }
             (0xF, 0x0, 0x0, 0x0, IsXc) => {
                 let addr = self.read_word()?;
-                self.cpu.inc_pc()?;
+                self.cpu.inc_pc();
                 self.cpu.i = addr;
                 Xc(Xci::LdILong)
             }
@@ -734,11 +727,8 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                 Xc(Xci::SelectPlanes { x })
             }
             (0xF, 0x0, 0x0, 0x2, IsXc) => {
-                let mut data = [0; 16];
-                data.copy_from_slice(
-                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + 16)?,
-                );
-                self.audio_pattern = data;
+                self.audio_pattern
+                    .copy_from_slice(mem_slice(&self.memory, self.cpu.i, 16)?);
                 Xc(Xci::WriteAudio)
             }
             (0xF, _, 0x0, 0x7, _) => {
@@ -777,9 +767,8 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                 Sc(Sci::LdHiResF { x })
             }
             (0xF, _, 0x3, 0x3, _) => {
-                let digits = bcd(self.cpu.get_v(x));
-                self.mem_slice_mut(self.cpu.i as usize..=self.cpu.i as usize + 2)?
-                    .copy_from_slice(&digits);
+                mem_slice_mut(&mut self.memory, self.cpu.i, 3)?
+                    .copy_from_slice(&bcd(self.cpu.get_v(x)));
                 I::LdB { x }
             }
             (0xF, _, 0x3, 0xA, IsXc) => {
@@ -787,25 +776,21 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                 Xc(Xci::SetPitch { x })
             }
             (0xF, _, 0x5, 0x5, _) => {
-                let mut data = [0; 16];
-                let slice = &mut data[..=u8::from(x) as usize];
-                slice.copy_from_slice(&self.cpu.v[..slice.len()]);
-                self.mem_slice_mut(self.cpu.i as usize..self.cpu.i as usize + slice.len())?
-                    .copy_from_slice(slice);
+                mem_slice_inclusive_mut(&mut self.memory, self.cpu.i, x_u8 as usize)?
+                    .copy_from_slice(&self.cpu.v[..=x_u8 as usize]);
                 if self.model.quirks().inc_i_on_slice {
-                    self.cpu.i += slice.len() as u16;
+                    self.cpu.i = self.cpu.i.wrapping_add(x_u8 as u16).wrapping_add(1);
                 }
                 I::LdToSlice { x }
             }
             (0xF, _, 0x6, 0x5, _) => {
-                let mut data = [0; 16];
-                let slice = &mut data[..=u8::from(x) as usize];
-                slice.copy_from_slice(
-                    self.mem_slice(self.cpu.i as usize..self.cpu.i as usize + slice.len())?,
-                );
-                self.cpu.v[..slice.len()].copy_from_slice(slice);
+                self.cpu.v[..=x_u8 as usize].copy_from_slice(mem_slice_inclusive(
+                    &self.memory,
+                    self.cpu.i,
+                    x_u8 as usize,
+                )?);
                 if self.model.quirks().inc_i_on_slice {
-                    self.cpu.i += slice.len() as u16;
+                    self.cpu.i = self.cpu.i.wrapping_add(x_u8 as u16).wrapping_add(1);
                 }
                 I::LdFromSlice { x }
             }
@@ -818,11 +803,11 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
                 self.cpu.v[..=u8::from(x) as usize]
                     .copy_from_slice(&self.rpl[..=u8::from(x) as usize]);
                 Sc(Sci::GetRegs { x })
-            },
+            }
             _ => {
                 self.cpu.dec_pc();
                 return Err(Error::InvalidInstruction(raw_instruction));
-            },
+            }
         };
 
         if self.vblank {
@@ -835,4 +820,54 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
 
 fn bcd(x: u8) -> [u8; 3] {
     [x / 100, x / 10 % 10, x % 10]
+}
+
+fn mem_slice(memory: &[u8], start: u16, offset: usize) -> Result<&[u8]> {
+    match memory.get(start as usize..(start as usize).wrapping_add(offset)) {
+        Some(slice) => Ok(slice),
+        None => Err(Error::InvalidMemoryRange {
+            start,
+            offset,
+            inclusive: false,
+            memory_size: memory.len(),
+        }),
+    }
+}
+
+fn mem_slice_inclusive(memory: &[u8], start: u16, offset: usize) -> Result<&[u8]> {
+    match memory.get(start as usize..=(start as usize).wrapping_add(offset)) {
+        Some(slice) => Ok(slice),
+        None => Err(Error::InvalidMemoryRange {
+            start,
+            offset,
+            inclusive: true,
+            memory_size: memory.len(),
+        }),
+    }
+}
+
+fn mem_slice_mut(memory: &mut [u8], start: u16, offset: usize) -> Result<&mut [u8]> {
+    let memory_len = memory.len();
+    match memory.get_mut(start as usize..(start as usize).wrapping_add(offset)) {
+        Some(slice) => Ok(slice),
+        None => Err(Error::InvalidMemoryRange {
+            start,
+            offset,
+            inclusive: false,
+            memory_size: memory_len,
+        }),
+    }
+}
+
+fn mem_slice_inclusive_mut(memory: &mut [u8], start: u16, offset: usize) -> Result<&mut [u8]> {
+    let memory_len = memory.len();
+    match memory.get_mut(start as usize..=(start as usize).wrapping_add(offset)) {
+        Some(slice) => Ok(slice),
+        None => Err(Error::InvalidMemoryRange {
+            start,
+            offset,
+            inclusive: true,
+            memory_size: memory_len,
+        }),
+    }
 }

@@ -26,7 +26,7 @@ struct Frame {
     size: UVec2,
 }
 
-#[derive(Resource)]
+#[derive(Clone, Resource)]
 struct EmulatorData {
     paused: bool,
     frame_rate: f64,
@@ -55,7 +55,6 @@ impl Default for EmulatorData {
 enum EmulatorEvent {
     PickRom,
     ResetMachine,
-    ChangeTickRate(f64),
 }
 
 const EMULATOR_TICK_RATE: DiagnosticPath = DiagnosticPath::const_new("emulator_tick_rate");

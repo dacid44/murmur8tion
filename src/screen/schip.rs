@@ -9,7 +9,7 @@ use super::{
     Screen,
 };
 
-#[derive(Zeroable)]
+#[derive(Clone, Zeroable)]
 pub struct LegacySuperChipScreen {
     data: [u128; 64],
     hires: bool,
@@ -118,7 +118,7 @@ impl Screen for LegacySuperChipScreen {
     }
 }
 
-#[derive(Zeroable)]
+#[derive(Clone, Zeroable)]
 pub struct ModernSuperChipScreen {
     data: [u128; 64],
     hires: bool,

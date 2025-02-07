@@ -1,9 +1,4 @@
-use std::{
-    collections::VecDeque,
-    fmt::Display,
-    ops::{Bound, RangeBounds},
-    slice::SliceIndex,
-};
+use std::fmt::Display;
 
 use arbitrary_int::{u12, u4, Number};
 use bevy::log::{info_span, warn};
@@ -14,10 +9,9 @@ use thiserror::Error;
 use crate::{
     frontend::audio::DEFAULT_PATTERN,
     instruction::{Args, Instruction, InstructionSet, SuperChipInstruction, XoChipInstruction},
-    model::{self, CosmacVip, DynamicModel, LegacySuperChip, Model, ModernSuperChip, XoChip},
+    model::{self, CosmacVip, DynamicModel, LegacySuperChip, ModernSuperChip, XoChip},
     screen::{
-        self, CosmacVipScreen, LegacySuperChipScreen, ModernSuperChipScreen, Palette, Screen,
-        XoChipScreen,
+        self, CosmacVipScreen, LegacySuperChipScreen, ModernSuperChipScreen, Palette, XoChipScreen,
     },
 };
 
@@ -53,7 +47,8 @@ fn format_range(start: u16, offset: usize, inclusive: bool) -> String {
 
 pub trait Machine: Send + Sync {
     fn event(&mut self, key: u4, event: KeyEvent);
-    fn render_frame(&mut self, palette: &Palette) -> image::RgbaImage;
+    fn render_frame(&self, palette: &Palette) -> image::RgbaImage;
+    fn tick_timers(&mut self);
     fn sound_active(&self) -> bool;
     fn pitch(&self) -> u8;
     fn audio_pattern(&self) -> &[u8; 16];
@@ -85,7 +80,8 @@ where
     Screen: screen::Screen,
 {
     blanket_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
-    blanket_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
+    blanket_machine_method!(render_frame(self: &Self, palette: &Palette) -> image::RgbaImage);
+    blanket_machine_method!(tick_timers(self: &mut Self));
     blanket_machine_method!(sound_active(self: &Self) -> bool);
     blanket_machine_method!(pitch(self: &Self) -> u8);
     blanket_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
@@ -108,6 +104,7 @@ macro_rules! dynamic_machine_method {
     }
 }
 
+#[derive(Clone)]
 pub enum DynamicMachine {
     CosmacVip(Chip8<CosmacVip, CosmacVipScreen>),
     LegacySuperChip(Chip8<LegacySuperChip, LegacySuperChipScreen>),
@@ -152,7 +149,8 @@ impl DynamicMachine {
 
 impl Machine for DynamicMachine {
     dynamic_machine_method!(event(self: &mut Self, key: u4, event: KeyEvent));
-    dynamic_machine_method!(render_frame(self: &mut Self, palette: &Palette) -> image::RgbaImage);
+    dynamic_machine_method!(render_frame(self: &Self, palette: &Palette) -> image::RgbaImage);
+    dynamic_machine_method!(tick_timers(self: &mut Self));
     dynamic_machine_method!(sound_active(self: &Self) -> bool);
     dynamic_machine_method!(pitch(self: &Self) -> u8);
     dynamic_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
@@ -161,6 +159,7 @@ impl Machine for DynamicMachine {
     dynamic_machine_method!(tick_many(self: &mut Self, count: u32) -> Result<bool>);
 }
 
+#[derive(Clone)]
 struct Cpu {
     v: [u8; 16],
     i: u16,
@@ -316,6 +315,7 @@ impl Keypad {
     }
 }
 
+#[derive(Clone)]
 pub struct Chip8<Model: model::Model, Screen: screen::Screen + ?Sized> {
     model: Model,
     keypad: Keypad,
@@ -365,7 +365,11 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
             .event(key, event, self.model.quirks().key_wait_trigger)
     }
 
-    pub fn render_frame(&mut self, palette: &Palette) -> image::RgbaImage {
+    pub fn render_frame(&self, palette: &Palette) -> image::RgbaImage {
+        self.screen.to_image(palette)
+    }
+
+    pub fn tick_timers(&mut self) {
         if self.cpu.dt > 0 {
             self.cpu.dt -= 1;
         }
@@ -373,7 +377,6 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
             self.cpu.st -= 1;
         }
         self.vblank = true;
-        self.screen.to_image(palette)
     }
 
     pub fn sound_active(&self) -> bool {

@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use super::{draw_line_clipping, screen_to_image, Palette, Screen};
 
-#[derive(Zeroable)]
+#[derive(Clone, Zeroable)]
 pub struct CosmacVipScreen([u64; 32]);
 
 impl Default for Box<CosmacVipScreen> {

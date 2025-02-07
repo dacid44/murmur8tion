@@ -25,6 +25,7 @@ const CADMIUM_PALETTE: [u32; 16] = [
     0x5d275dff, 0x38b764ff, 0x29366fff, 0x566c86ff, 0xef7d57ff, 0x73eff7ff, 0x41a6f6ff, 0x257179ff,
 ];
 
+#[derive(Debug, Clone)]
 pub struct Palette {
     pub two_color: [Rgba<u8>; 2],
     pub sixteen_color: [Rgba<u8>; 16],
@@ -82,7 +83,7 @@ pub enum UnsupportedScreenOperation {
 
 type Result<T, E = UnsupportedScreenOperation> = std::result::Result<T, E>;
 
-pub trait Screen: Send + Sync {
+pub trait Screen: BoxDynClone + Send + Sync {
     fn width(&self) -> u8;
     fn height(&self) -> u8;
     fn clear(&mut self);
@@ -117,6 +118,22 @@ pub trait Screen: Send + Sync {
     fn to_image(&self, palette: &Palette) -> RgbaImage;
 }
 
+trait BoxDynClone {
+    fn box_dyn_clone(&self) -> Box<dyn Screen>;
+}
+
+impl<T> BoxDynClone for T
+where
+    T: Clone + Screen,
+    Box<T>: Default + 'static,
+{
+    fn box_dyn_clone(&self) -> Box<dyn Screen> {
+        let mut screen = Box::<Self>::default();
+        screen.as_mut().clone_from(self);
+        screen
+    }
+}
+
 macro_rules! screen_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
@@ -133,6 +150,7 @@ macro_rules! screen_method {
 #[repr(u8)]
 #[derive(Zeroable)]
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum DynamicScreen {
     CosmacVip(CosmacVipScreen) = 0,
     LegacySuperChip(LegacySuperChipScreen) = 1,
@@ -179,16 +197,34 @@ impl DynamicScreen {
 
 #[test]
 fn test_new_dynamic_screen() {
-    assert!(matches!(DynamicScreen::new_with_discriminant(0).as_ref(), DynamicScreen::CosmacVip(_)));
-    assert!(matches!(DynamicScreen::new_with_discriminant(1).as_ref(), DynamicScreen::LegacySuperChip(_)));
-    assert!(matches!(DynamicScreen::new_with_discriminant(2).as_ref(), DynamicScreen::ModernSuperChip(_)));
-    assert!(matches!(DynamicScreen::new_with_discriminant(3).as_ref(), DynamicScreen::XoChip(_)));
+    assert!(matches!(
+        DynamicScreen::new_with_discriminant(0).as_ref(),
+        DynamicScreen::CosmacVip(_)
+    ));
+    assert!(matches!(
+        DynamicScreen::new_with_discriminant(1).as_ref(),
+        DynamicScreen::LegacySuperChip(_)
+    ));
+    assert!(matches!(
+        DynamicScreen::new_with_discriminant(2).as_ref(),
+        DynamicScreen::ModernSuperChip(_)
+    ));
+    assert!(matches!(
+        DynamicScreen::new_with_discriminant(3).as_ref(),
+        DynamicScreen::XoChip(_)
+    ));
 }
 
 #[test]
 #[should_panic]
 fn test_invalid_dynamic_screen() {
     DynamicScreen::new_with_discriminant(4);
+}
+
+impl Default for Box<DynamicScreen> {
+    fn default() -> Self {
+        DynamicScreen::new_cosmac_vip()
+    }
 }
 
 impl Screen for DynamicScreen {
@@ -237,6 +273,24 @@ impl Screen for Box<dyn Screen> {
     dyn_screen_method!(scroll_left(self: &mut Self) -> Result<()>);
     dyn_screen_method!(to_image(self: &Self, palette: &Palette) -> RgbaImage);
 }
+
+impl BoxDynClone for Box<dyn Screen> {
+    fn box_dyn_clone(&self) -> Box<dyn Screen> {
+        self.as_ref().box_dyn_clone()
+    }
+}
+
+impl Clone for Box<dyn Screen> {
+    fn clone(&self) -> Self {
+        self.box_dyn_clone()
+    }
+}
+
+// impl Clone for Box<dyn Screen> {
+//     fn clone(&self) -> Self {
+//         let mut screen =
+//     }
+// }
 
 pub const FONT_ADDRESS: usize = 0;
 pub const FONT: [[u8; 5]; 16] = [

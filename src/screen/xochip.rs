@@ -8,7 +8,7 @@ use super::{
     combine_planes, double_bits_holger, double_bits_magic, draw_line, Palette, Result, Screen,
 };
 
-#[derive(Zeroable)]
+#[derive(Clone, Zeroable)]
 pub struct XoChipScreen {
     data: [[u128; 64]; 4],
     enabled_planes: [bool; 4],

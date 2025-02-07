@@ -5,10 +5,12 @@ use bevy::{
 use bevy_egui::egui::{self, Ui};
 use widgets::{edit_quirks, model_selector, palette_editor};
 
-use crate::model::{self, Model};
+use crate::model::{Model};
 
 use super::{
-    debug::{show_debug_options, DebugOptions}, machine::FRAME_TICK_TIME, EmulatorData, EmulatorEvent
+    debug::{show_debug_options, DebugOptions},
+    machine::{EMULATOR_FPS, FRAME_TICK_TIME},
+    EmulatorData, EmulatorEvent,
 };
 
 pub mod style;
@@ -34,8 +36,16 @@ pub fn draw_main_ui(
             .unwrap_or(0.0)
     ));
     ui.0.label(format!(
+        "Emulator FPS: {:.1}",
+        diagnostics
+            .get(&EMULATOR_FPS)
+            .and_then(|time| time.average())
+            .unwrap_or(0.0)
+    ));
+    ui.0.label(format!(
         "Frame millis: {:.2}",
-        diagnostics.get(&FRAME_TICK_TIME)
+        diagnostics
+            .get(&FRAME_TICK_TIME)
             .and_then(|time| time.average())
             .unwrap_or(0.0)
     ));
@@ -69,7 +79,6 @@ pub fn draw_main_ui(
             );
             if emulator_data.frame_rate != original_tick_rate {
                 emulator_data.use_default_framerate = false;
-                events.send(EmulatorEvent::ChangeTickRate(emulator_data.frame_rate));
             }
             if ui
                 .toggle_value(
@@ -80,7 +89,6 @@ pub fn draw_main_ui(
                 && emulator_data.use_default_framerate
             {
                 emulator_data.frame_rate = emulator_data.machine_model.default_framerate();
-                events.send(EmulatorEvent::ChangeTickRate(emulator_data.frame_rate));
             };
 
             ui.add(

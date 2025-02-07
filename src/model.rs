@@ -3,10 +3,7 @@ use std::fmt::Display;
 use crate::{
     hardware::{Chip8, KeyEvent, Machine},
     instruction::InstructionSet,
-    screen::{
-        self, CosmacVipScreen, DynamicScreen, LegacySuperChipScreen, ModernSuperChipScreen, Screen,
-        XoChipScreen,
-    },
+    screen::{CosmacVipScreen, LegacySuperChipScreen, ModernSuperChipScreen, Screen, XoChipScreen},
 };
 
 pub trait Model: Send + Sync {

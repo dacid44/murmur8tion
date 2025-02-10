@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use arbitrary_int::{u12, u4, Number};
-use bevy::log::{info_span, warn};
+use bevy::log::warn;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use thiserror::Error;

@@ -7,15 +7,13 @@ use bevy::{
     input::{keyboard::KeyboardInput, ButtonState},
     prelude::*,
     render::render_resource::Extent3d,
-    tasks::AsyncComputeTaskPool,
 };
 use image::RgbaImage;
 use keymap::KeyMapping;
 
 use crate::{
-    hardware::{self, Chip8, DynamicMachine, KeyEvent, Machine as HardwareMachine},
-    model::{CosmacVip, DynamicModel, Model},
-    screen::Screen,
+    hardware::{self, DynamicMachine, KeyEvent, Machine as HardwareMachine},
+    model::{CosmacVip, Model},
 };
 
 use super::{audio::Chip8Audio, rom::Rom, EmulatorData, EmulatorEvent, Frame};

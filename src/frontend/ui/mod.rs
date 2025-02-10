@@ -5,7 +5,7 @@ use bevy::{
 use bevy_egui::egui::{self, Ui};
 use widgets::{edit_quirks, model_selector, palette_editor};
 
-use crate::model::{Model};
+use crate::model::Model;
 
 use super::{
     debug::{show_debug_options, DebugOptions},

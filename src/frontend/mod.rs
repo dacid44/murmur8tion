@@ -81,7 +81,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut audio_assets: ResMut<Assets<Chip8Audio>>,
 ) {
-    commands.spawn(Camera2d);
+    commands.spawn(bevy::core_pipeline::core_2d::Camera2d);
 
     let image = Image::new_fill(
         Extent3d {

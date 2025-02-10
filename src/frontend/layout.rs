@@ -8,7 +8,7 @@ use bevy_egui::{
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 
 use super::{
-    debug,
+    debug::{self, render_grid_egui},
     ui::{draw_main_ui, style},
 };
 
@@ -55,7 +55,12 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
             .fill(background_color)
             .show(ui, |ui| {
                 match pane {
-                    EmulatorTab::Display => *self.display_rect = Some(ui.clip_rect()),
+                    EmulatorTab::Display => {
+                        *self.display_rect = Some(ui.clip_rect());
+                        self.world
+                            .run_system_cached_with(render_grid_egui, ui)
+                            .expect("failed to draw debug grid");
+                    }
                     EmulatorTab::Main => {
                         self.world
                             .run_system_cached_with(draw_main_ui, ui)
@@ -211,7 +216,10 @@ pub fn layout_plugin(app: &mut App) {
         .init_resource::<DisplayRect>()
         .add_systems(Startup, setup)
         .add_systems(Update, draw_ui)
-        .add_systems(PostUpdate, scale_display.run_if(any_with_component::<PrimaryWindow>));
+        .add_systems(
+            PostUpdate,
+            scale_display.run_if(any_with_component::<PrimaryWindow>),
+        );
 }
 
 fn setup(mut commands: Commands) {

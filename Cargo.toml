@@ -10,12 +10,10 @@ async-fs = "2.1.2"
 bevy = { version = "0.15.0", default-features = false, features = [
     "bevy_asset",
     "bevy_audio",
-    "bevy_gizmos",
     "bevy_render",
     "bevy_sprite",
     "bevy_window",
     "bevy_winit",
-    "multi_threaded",
     "wayland",
     "x11",
 ] }
@@ -23,24 +21,26 @@ bevy-inspector-egui = "0.29.1"
 bevy_egui = "0.32.0"
 bitbybit = "1.3.3"
 bytemuck = { version = "1.21.0", features = ["must_cast"] }
-coz = "0.1.3"
 egui_tiles = { version = "0.11.0", default-features = false }
 image = { version = "0.25.5", default-features = false }
 num-traits = "0.2.19"
-paste = "1.0.15"
-puffin = "0.19.1"
+# puffin = "0.19.1"
 rand = { version = "0.9.0", default-features = false, features = ["os_rng"] }
 rand_xoshiro = "0.7.0"
+range_vec = { git = "https://github.com/dacid44/range_vec", version = "0.1.1" }
 rfd = "0.15.2"
 rodio = { version = "0.19.0", default-features = false }
 spin_sleep = "1.3.0"
 thiserror = "2.0.11"
-tracing = "0.1.41"
-tracing-flame = "0.2.0"
-tracing-subscriber = "0.3.19"
+# tracing = "0.1.41"
+# tracing-flame = "0.2.0"
+# tracing-subscriber = "0.3.19"
 
 [profile.release]
-debug = true
+# debug = true
+opt-level = 3
+# lto = "thin"
+# codegen-units = 1
 
 [dev-dependencies]
 criterion = "0.5.1"

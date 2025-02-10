@@ -1,6 +1,5 @@
 use std::ops::BitOr;
 
-use bevy::log::info_span;
 use bytemuck::Zeroable;
 use image::RgbaImage;
 

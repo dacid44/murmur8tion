@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use arbitrary_int::{u12, u4, Number};
 use bevy::log::warn;
+use bytemuck::Zeroable;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use thiserror::Error;
@@ -53,6 +54,7 @@ pub trait Machine: Send + Sync {
     fn pitch(&self) -> u8;
     fn audio_pattern(&self) -> &[u8; 16];
     fn memory(&self) -> &[u8];
+    fn cpu(&self) -> &Cpu;
     fn tick(&mut self) -> Result<bool>;
     fn tick_many(&mut self, count: u32) -> Result<bool> {
         for _ in 0..count {
@@ -86,6 +88,7 @@ where
     blanket_machine_method!(pitch(self: &Self) -> u8);
     blanket_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
     blanket_machine_method!(memory(self: &Self) -> &[u8]);
+    blanket_machine_method!(cpu(self: &Self) -> &Cpu);
     blanket_machine_method!(tick(self: &mut Self) -> Result<bool>);
 }
 
@@ -155,19 +158,20 @@ impl Machine for DynamicMachine {
     dynamic_machine_method!(pitch(self: &Self) -> u8);
     dynamic_machine_method!(audio_pattern(self: &Self) -> &[u8; 16]);
     dynamic_machine_method!(memory(self: &Self) -> &[u8]);
+    dynamic_machine_method!(cpu(self: &Self) -> &Cpu);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
     dynamic_machine_method!(tick_many(self: &mut Self, count: u32) -> Result<bool>);
 }
 
 #[derive(Clone)]
-struct Cpu {
-    v: [u8; 16],
-    i: u16,
-    dt: u8,
-    st: u8,
-    pc: u16,
-    sp: u4,
-    stack: [u16; 16],
+pub struct Cpu {
+    pub v: [u8; 16],
+    pub i: u16,
+    pub dt: u8,
+    pub st: u8,
+    pub pc: u16,
+    pub sp: u4,
+    pub stack: [u16; 16],
 }
 
 impl Default for Cpu {
@@ -393,6 +397,10 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
 
     pub fn memory(&self) -> &[u8] {
         &self.memory
+    }
+
+    pub fn cpu(&self) -> &Cpu {
+        &self.cpu
     }
 
     fn draw_wait_for_vblank(&self) -> bool {

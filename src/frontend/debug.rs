@@ -1,4 +1,8 @@
-use std::fmt::Display;
+use std::{
+    f32,
+    fmt::{Display, UpperHex},
+    ops::{Sub, SubAssign},
+};
 
 use bevy::prelude::*;
 use bevy_egui::{
@@ -8,7 +12,7 @@ use bevy_egui::{
 use bevy_inspector_egui::bevy_inspector;
 use range_vec::RangeVec;
 
-use crate::hardware::Machine as HardwareMachine;
+use crate::hardware::{self, Machine as HardwareMachine};
 
 use super::{layout::ScaleToDisplay, machine::Machine, ui::style, Frame, FRAME_ASPECT_RATIO};
 
@@ -260,5 +264,85 @@ pub fn memory_ui(ui: InMut<Ui>, machine: Option<Res<Machine>>, mut state: Local<
                 state.update(&memory[range], range_start);
             },
         );
+    });
+}
+
+pub struct Counters(hardware::Cpu);
+
+impl Default for Counters {
+    fn default() -> Self {
+        Self(hardware::Cpu {
+            pc: 0,
+            ..Default::default()
+        })
+    }
+}
+
+pub fn registers_ui(
+    ui: InMut<Ui>,
+    machine: Option<Res<Machine>>,
+    mut last_cpu: Local<hardware::Cpu>,
+    mut counters: Local<Counters>,
+) {
+    let cpu = machine
+        .map(|machine| machine.machine.cpu().clone())
+        .unwrap_or_default();
+    let counters = &mut counters.0;
+
+    ui.0.vertical(|ui| {
+        egui::Grid::new("cpu_v_registers")
+            .spacing(ui.style().spacing.item_spacing * egui::vec2(2.0, 1.0))
+            .show(ui, |ui| {
+                for i in 0..16 {
+                    let reg = (i % 4 * 4) + (i / 4);
+                    show_register(
+                        ui,
+                        format!("v{:X}", reg),
+                        2,
+                        cpu.v[reg],
+                        &mut last_cpu.v[reg],
+                        &mut counters.v[reg],
+                    );
+                    if i % 4 == 3 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+        ui.add_space(ui.style().spacing.item_spacing.y);
+        show_register(ui, "PC:", 4, cpu.pc, &mut last_cpu.pc, &mut counters.pc);
+
+        ui.add_space(ui.style().spacing.item_spacing.y);
+        show_register(ui, "I:", 4, cpu.i, &mut last_cpu.i, &mut counters.i);
+
+        ui.add_space(ui.style().spacing.item_spacing.y);
+        show_register(ui, "DT:", 2, cpu.dt, &mut last_cpu.dt, &mut counters.dt);
+        show_register(ui, "ST:", 2, cpu.st, &mut last_cpu.st, &mut counters.st);
+    });
+}
+
+fn show_register<V>(
+    ui: &mut Ui,
+    label: impl Into<egui::RichText>,
+    digits: usize,
+    value: V,
+    last_value: &mut V,
+    counter: &mut V,
+) where
+    V: Copy + Display + UpperHex + Eq + Ord + SubAssign + From<u8> + Into<f32>,
+{
+    if value != *last_value {
+        *counter = 30.into();
+    } else if *counter > 0.into() {
+        *counter -= 1.into();
+    }
+    // println!("value: {value}, last_value: {last_value}, counter: {counter}");
+    *last_value = value;
+    let color =
+        style::FOREGROUND_LIGHT.lerp_to_gamma(style::ACCENT_LIGHT, (*counter).into() / 30.0);
+
+    ui.horizontal(|ui| {
+        ui.colored_label(style::FOREGROUND_MID, label);
+        ui.colored_label(color, format!("{1:00$X}", digits, value));
     });
 }

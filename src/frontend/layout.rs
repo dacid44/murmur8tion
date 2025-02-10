@@ -8,7 +8,7 @@ use bevy_egui::{
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 
 use super::{
-    debug::{self, render_grid_egui},
+    debug,
     ui::{draw_main_ui, style},
 };
 
@@ -19,6 +19,7 @@ pub enum EmulatorTab {
     BevyInspector,
     EguiInspector,
     Memory,
+    Registers,
 }
 
 impl Display for EmulatorTab {
@@ -29,6 +30,7 @@ impl Display for EmulatorTab {
             EmulatorTab::BevyInspector => write!(f, "Bevy Inspector"),
             EmulatorTab::EguiInspector => write!(f, "Egui Inspector"),
             EmulatorTab::Memory => write!(f, "Memory"),
+            EmulatorTab::Registers => write!(f, "Registers"),
         }
     }
 }
@@ -58,7 +60,7 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                     EmulatorTab::Display => {
                         *self.display_rect = Some(ui.clip_rect());
                         self.world
-                            .run_system_cached_with(render_grid_egui, ui)
+                            .run_system_cached_with(debug::render_grid_egui, ui)
                             .expect("failed to draw debug grid");
                     }
                     EmulatorTab::Main => {
@@ -80,6 +82,11 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                         self.world
                             .run_system_cached_with(debug::memory_ui, ui)
                             .expect("failed to draw memory view UI");
+                    }
+                    EmulatorTab::Registers => {
+                        self.world
+                            .run_system_cached_with(debug::registers_ui, ui)
+                            .expect("failed to draw registers UI");
                     }
                 }
                 ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
@@ -239,6 +246,7 @@ fn setup(mut commands: Commands) {
             EmulatorTab::BevyInspector,
             EmulatorTab::EguiInspector,
             EmulatorTab::Memory,
+            EmulatorTab::Registers,
         ],
     });
 }

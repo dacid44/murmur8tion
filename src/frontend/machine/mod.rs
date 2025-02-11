@@ -27,14 +27,15 @@ pub const EMULATOR_FPS: DiagnosticPath = DiagnosticPath::const_new("emulator_fps
 pub struct Machine {
     initialized: bool,
     pub machine: DynamicMachine,
-    tx: Sender<ToMachine>,
+    pub tx: Sender<ToMachine>,
     frame_rx: Receiver<FrameEvent>,
 }
 
-enum ToMachine {
+pub enum ToMachine {
     Input(u4, KeyEvent),
     ResetMachine(DynamicMachine),
     Pause(bool),
+    Step,
     SetFrequency(f64),
     SetIpf(u32),
     Exit,
@@ -151,7 +152,7 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
             frame_tx
                 .try_send(FrameEvent {
                     machine: machine.clone(),
-                    error: error.take(),
+                    error: error.as_ref().filter(|_| machine.is_some()).cloned(),
                     frame_time,
                     audio_status: match (
                         machine
@@ -166,12 +167,29 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
                 })
                 .expect("Failed to send frame, receiver disconnected");
 
+            if error.is_some() {
+                machine = None;
+            }
+
             let mut inputs = Vec::new();
             while let Ok(message) = rx.try_recv() {
                 match message {
                     ToMachine::Input(key, event) => inputs.push((key, event)),
-                    ToMachine::ResetMachine(new_machine) => machine = Some(new_machine),
+                    ToMachine::ResetMachine(new_machine) => {
+                        machine = Some(new_machine);
+                        error = None;
+                    }
                     ToMachine::Pause(pause) => paused = pause,
+                    ToMachine::Step => {
+                        if let Some(machine) =
+                            machine.as_mut().filter(|_| error.is_none())
+                        {
+                            println!("stepping");
+                            if let Err(err) = machine.tick() {
+                                error = Some(err);
+                            }
+                        }
+                    }
                     ToMachine::SetFrequency(frequency) => {
                         timestep = Duration::from_secs_f64(1.0 / frequency)
                     }
@@ -180,7 +198,7 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
                 }
             }
 
-            if let Some(machine) = machine.as_mut().filter(|_| !paused) {
+            if let Some(machine) = machine.as_mut().filter(|_| !paused && error.is_none()) {
                 for (key, event) in inputs {
                     machine.event(key, event);
                 }
@@ -188,10 +206,6 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
                 if let Err(err) = machine.tick_many(ipf) {
                     error = Some(err);
                 }
-            }
-
-            if error.is_some() {
-                machine = None;
             }
 
             let now = Instant::now();

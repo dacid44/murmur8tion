@@ -61,7 +61,7 @@ impl Palette {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum UnsupportedScreenOperation {
     #[error("this screen type does not support hires mode")]
     HiresMode,

@@ -16,10 +16,11 @@ use super::{
 pub enum EmulatorTab {
     Main,
     Display,
-    BevyInspector,
-    EguiInspector,
+    Debugger,
     Memory,
     Registers,
+    BevyInspector,
+    EguiInspector,
 }
 
 impl Display for EmulatorTab {
@@ -27,10 +28,11 @@ impl Display for EmulatorTab {
         match self {
             EmulatorTab::Main => write!(f, "Main"),
             EmulatorTab::Display => write!(f, "Display"),
-            EmulatorTab::BevyInspector => write!(f, "Bevy Inspector"),
-            EmulatorTab::EguiInspector => write!(f, "Egui Inspector"),
+            EmulatorTab::Debugger => write!(f, "Debugger"),
             EmulatorTab::Memory => write!(f, "Memory"),
             EmulatorTab::Registers => write!(f, "Registers"),
+            EmulatorTab::BevyInspector => write!(f, "Bevy Inspector"),
+            EmulatorTab::EguiInspector => write!(f, "Egui Inspector"),
         }
     }
 }
@@ -68,15 +70,10 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                             .run_system_cached_with(draw_main_ui, ui)
                             .expect("failed to draw main UI tab");
                     }
-                    EmulatorTab::BevyInspector => {
+                    EmulatorTab::Debugger => {
                         self.world
-                            .run_system_cached_with(debug::bevy_inspector_ui, ui)
-                            .expect("failed to draw bevy inspector UI");
-                    }
-                    EmulatorTab::EguiInspector => {
-                        self.world
-                            .run_system_cached_with(debug::egui_inspector_ui, ui)
-                            .expect("failed to draw egui inspector UI");
+                            .run_system_cached_with(debug::debugger_ui, ui)
+                            .expect("failed to draw debugger UI");
                     }
                     EmulatorTab::Memory => {
                         self.world
@@ -87,6 +84,16 @@ impl egui_tiles::Behavior<EmulatorTab> for Behavior<'_> {
                         self.world
                             .run_system_cached_with(debug::registers_ui, ui)
                             .expect("failed to draw registers UI");
+                    }
+                    EmulatorTab::BevyInspector => {
+                        self.world
+                            .run_system_cached_with(debug::bevy_inspector_ui, ui)
+                            .expect("failed to draw bevy inspector UI");
+                    }
+                    EmulatorTab::EguiInspector => {
+                        self.world
+                            .run_system_cached_with(debug::egui_inspector_ui, ui)
+                            .expect("failed to draw egui inspector UI");
                     }
                 }
                 ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
@@ -243,10 +250,11 @@ fn setup(mut commands: Commands) {
     commands.insert_resource(Layout {
         tree,
         available_panes: vec![
-            EmulatorTab::BevyInspector,
-            EmulatorTab::EguiInspector,
+            EmulatorTab::Debugger,
             EmulatorTab::Memory,
             EmulatorTab::Registers,
+            EmulatorTab::BevyInspector,
+            EmulatorTab::EguiInspector,
         ],
     });
 }

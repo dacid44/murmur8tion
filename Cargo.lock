@@ -3016,6 +3016,7 @@ dependencies = [
  "egui_tiles",
  "image",
  "num-traits",
+ "paste",
  "rand 0.9.0",
  "rand_xoshiro",
  "range_vec",

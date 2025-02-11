@@ -203,7 +203,7 @@ impl DynamicModel {
 pub struct CosmacVip(pub Quirks);
 
 impl CosmacVip {
-    const QUIRKS: Quirks = Quirks {
+    pub const QUIRKS: Quirks = Quirks {
         graceful_exit_on_0000: false,
         bitshift_use_y: true,
         key_wait_trigger: KeyEvent::Release,

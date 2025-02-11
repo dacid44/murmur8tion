@@ -6,15 +6,24 @@ use std::{
 
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{self, Ui},
+    egui::{self, style::ScrollAnimation, Ui, WidgetText},
     EguiContexts,
 };
 use bevy_inspector_egui::bevy_inspector;
 use range_vec::RangeVec;
 
-use crate::hardware::{self, Machine as HardwareMachine};
+use crate::{
+    hardware::{self, Machine as HardwareMachine},
+    instruction::{ExecuteInstruction, InstructionSet, OctoSyntax},
+    model::{CosmacVip, Quirks},
+};
 
-use super::{layout::ScaleToDisplay, machine::Machine, ui::style, Frame, FRAME_ASPECT_RATIO};
+use super::{
+    layout::ScaleToDisplay,
+    machine::{Machine, ToMachine},
+    ui::style,
+    EmulatorData, Frame, FRAME_ASPECT_RATIO,
+};
 
 #[derive(Resource, Clone, Default)]
 pub struct DebugOptions {
@@ -160,6 +169,170 @@ pub fn render_grid_egui(
             );
         }
     }
+}
+
+#[derive(Default)]
+pub struct DebuggerState {
+    last_pc: u16,
+    scroll_offset: f32,
+    is_odd: Option<bool>,
+}
+
+pub fn debugger_ui(
+    ui: InMut<Ui>,
+    machine: Option<Res<Machine>>,
+    mut emulator_data: ResMut<EmulatorData>,
+    mut state: Local<DebuggerState>,
+) {
+    ui.0.horizontal(|ui| {
+        if large_button(ui, "▶", !emulator_data.paused, true).clicked() {
+            emulator_data.paused = false;
+        }
+        if large_button(ui, "⏸", emulator_data.paused, true).clicked() {
+            emulator_data.paused = true;
+        }
+
+        if large_button(ui, "»", false, false).clicked() {
+            if let Some(machine) = machine.as_ref() {
+                machine.tx.try_send(ToMachine::Step).unwrap();
+            }
+        }
+    });
+
+    ui.0.horizontal(|ui| {
+        ui.selectable_value(&mut state.is_odd, Some(false), "Even");
+        ui.selectable_value(&mut state.is_odd, Some(true), "Odd");
+        ui.selectable_value(&mut state.is_odd, None, "Follow PC");
+    });
+
+    let (memory, pc, quirks, instruction_set) = machine
+        .as_ref()
+        .map(|machine| {
+            (
+                machine.machine.memory(),
+                machine.machine.cpu().pc,
+                machine.machine.quirks(),
+                machine.machine.instruction_set(),
+            )
+        })
+        .unwrap_or((&[], 0x200, &CosmacVip::QUIRKS, InstructionSet::CosmacVip));
+    let pc_usize = pc as usize;
+    let is_odd = state.is_odd.unwrap_or(pc % 2 == 1);
+    let num_rows = (memory.len() / 2).saturating_sub(is_odd as usize);
+    let text_height = ui.0.text_style_height(&egui::TextStyle::Body);
+
+    state.scroll_offset = egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show_rows(ui.0, text_height, num_rows, |ui, rows| {
+            let spacing = ui.style().spacing.item_spacing.x;
+
+            if pc != state.last_pc {
+                let scroll_row = if pc == 0 {
+                    pc_usize + (pc % 2 == 1 && is_odd) as usize
+                } else {
+                    pc_usize - (pc % 2 == 1 && is_odd) as usize
+                } / 2;
+                let top = (text_height + ui.style().spacing.item_spacing.y) * scroll_row as f32
+                    - state.scroll_offset;
+                let bottom = top + text_height;
+
+                ui.scroll_to_rect_animation(
+                    egui::Rect::from_x_y_ranges(ui.clip_rect().x_range(), top..=bottom),
+                    Some(egui::Align::Center),
+                    ScrollAnimation::none(),
+                );
+
+                state.last_pc = pc;
+            }
+
+            for row in rows {
+                ui.horizontal(|ui| {
+                    let address = row * 2 + (is_odd as usize);
+                    let pc_color = if pc_usize == address {
+                        Some(style::ACCENT_LIGHT)
+                    } else if address + 1 == pc_usize || pc_usize + 1 == address {
+                        Some(style::ACCENT_MID)
+                    } else {
+                        None
+                    };
+
+                    ui.colored_label(
+                        pc_color.unwrap_or(style::FOREGROUND_MID),
+                        format!("{address:04X}:"),
+                    );
+                    ui.add_space(spacing);
+
+                    let color = pc_color.unwrap_or(style::FOREGROUND_LIGHT);
+                    if let Some((opcode, long_address, instruction)) =
+                        get_opcode(memory, address, quirks, instruction_set)
+                    {
+                        ui.colored_label(
+                            color,
+                            match long_address {
+                                Some(addr) => format!("{opcode:04X} {addr:04X}"),
+                                None => format!("{opcode:04X}     "),
+                            },
+                        );
+                        ui.add_space(spacing * 2.0);
+                        ui.colored_label(color, instruction);
+                    }
+                });
+            }
+        })
+        .state
+        .offset
+        .y;
+}
+
+fn get_opcode(
+    memory: &[u8],
+    address: usize,
+    quirks: &Quirks,
+    instruction_set: InstructionSet,
+) -> Option<(u16, Option<u16>, String)> {
+    let opcode = u16::from_be_bytes([*memory.get(address)?, *memory.get(address + 1)?]);
+    let next_word = memory
+        .get(address + 2)
+        .zip(memory.get(address + 3))
+        .map(|(left, right)| u16::from_be_bytes([*left, *right]));
+    let last_word = address
+        .checked_sub(2)
+        .and_then(|addr| memory.get(addr).zip(memory.get(addr + 1)))
+        .map(|(left, right)| u16::from_be_bytes([*left, *right]));
+
+    let mut parser = OctoSyntax(quirks, next_word);
+    let Some(mut instruction) = parser.execute(opcode, instruction_set) else {
+        return Some((opcode, None, "????".to_owned()));
+    };
+    if last_word
+        .and_then(|last_opcode| OctoSyntax(quirks, None).execute(last_opcode, instruction_set))
+        .is_some_and(|instruction| instruction.ends_with("then"))
+    {
+        instruction.insert_str(0, "    ");
+    }
+    Some((opcode, parser.1.xor(next_word), instruction))
+}
+
+fn large_button(
+    ui: &mut Ui,
+    label: impl Into<String>,
+    raised_text: bool,
+    selected: bool,
+) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(label)
+                .family(if raised_text {
+                    egui::FontFamily::Name("Pixel Code Raised".into())
+                } else {
+                    egui::FontFamily::Proportional
+                })
+                .size(egui::TextStyle::Button.resolve(ui.style()).size * 2.0),
+        )
+        .min_size(style::LARGE_BUTTON_SIZE)
+        .stroke(ui.visuals().widgets.inactive.bg_stroke)
+        .selected(selected),
+    )
 }
 
 pub struct MemoryState {

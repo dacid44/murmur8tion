@@ -1,6 +1,8 @@
 use arbitrary_int::{u12, u4};
 use bitbybit::bitfield;
 
+use crate::model::Quirks;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InstructionSet {
     CosmacVip,
@@ -38,160 +40,264 @@ struct RawInstruction {
     kk: u8,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Args {
-    XKk { x: u4, kk: u8 },
-    XY { x: u4, y: u4 },
+#[macro_export]
+macro_rules! match_execute {
+    ($type:ty, $self:ident, $x:ident, $y:ident, $n:ident, $x_u8:ident, $y_u8:ident, $n_u8:ident, $nn:ident, $nnn:ident; $return:expr; $($opcode:ident => $impl:expr)*) => {
+        $(
+            ::paste::paste! {
+                #[inline(always)]
+                #[allow(unreachable_code)]
+                #[allow(unused_variables)]
+                fn [<execute $opcode>](
+                    $self: &mut Self,
+                    $x: ::arbitrary_int::u4,
+                    $y: ::arbitrary_int::u4,
+                    $n: ::arbitrary_int::u4,
+                    $x_u8: u8,
+                    $y_u8: u8,
+                    $n_u8: u8,
+                    $nn: u8,
+                    $nnn: u16,
+                ) -> $type {
+                    $impl;
+                    $return
+                }
+            }
+        )*
+    };
+    ($type:ty, $self:ident, $x:ident, $y:ident, $n:ident, $x_u8:ident, $y_u8:ident, $n_u8:ident, $nn:ident, $nnn:ident; $($opcode:ident => $impl:expr)*) => {
+        $(
+            ::paste::paste! {
+                #[inline(always)]
+                #[allow(unreachable_code)]
+                #[allow(unused_variables)]
+                fn [<execute $opcode>](
+                    $self: &mut Self,
+                    $x: ::arbitrary_int::u4,
+                    $y: ::arbitrary_int::u4,
+                    $n: ::arbitrary_int::u4,
+                    $x_u8: u8,
+                    $y_u8: u8,
+                    $n_u8: u8,
+                    $nn: u8,
+                    $nnn: u16,
+                ) -> $type {
+                    $impl.into()
+                }
+            }
+        )*
+    };
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Instruction {
-    Exit0,
-    Cls,
-    Ret,
-    Jp { nnn: u12 },
-    JpV0 { nnn: u12 },
-    Call { nnn: u12 },
-    Se(Args),
-    Sne(Args),
-    Skp { x: u4 },
-    Sknp { x: u4 },
-    Ld(Args),
-    LdI { nnn: u12 },
-    LdToDt { x: u4 },
-    LdFromDt { x: u4 },
-    LdSt { x: u4 },
-    LdFromKey { x: u4 },
-    LdF { x: u4 },
-    LdB { x: u4 },
-    LdToSlice { x: u4 },
-    LdFromSlice { x: u4 },
-    Add(Args),
-    AddI { x: u4 },
-    Or { x: u4, y: u4 },
-    And { x: u4, y: u4 },
-    Xor { x: u4, y: u4 },
-    Shl { x: u4, y: u4 },
-    Shr { x: u4, y: u4 },
-    Sub { x: u4, y: u4 },
-    Subn { x: u4, y: u4 },
-    Rnd { x: u4, kk: u8 },
-    Drw { x: u4, y: u4, n: u4 },
-    SuperChip(SuperChipInstruction),
-    XoChip(XoChipInstruction),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SuperChipInstruction {
-    Exit,
-    LoRes,
-    HiRes,
-    DrawLarge { x: u4, y: u4 },
-    StoreRegs { x: u4 },
-    GetRegs { x: u4 },
-    ScrollDown { n: u4 },
-    ScrollRight,
-    ScrollLeft,
-    LdHiResF { x: u4 },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum XoChipInstruction {
-    ScrollUp { n: u4 },
-    RegRangeToMem { x: u4, y: u4 },
-    RegRangeFromMem { x: u4, y: u4 },
-    LdILong,
-    SelectPlanes { x: u4 },
-    WriteAudio,
-    SetPitch { x: u4 },
-}
-
-impl Instruction {
+#[allow(non_snake_case)]
+#[allow(clippy::too_many_arguments)]
+#[rustfmt::skip]
+pub trait ExecuteInstruction<T> {
     #[inline(always)]
-    pub fn from_u16(instruction: u16, instruction_set: InstructionSet) -> Option<Self> {
-        use Instruction::SuperChip as Sc;
-        use Instruction::XoChip as Xc;
+    fn execute(&mut self, opcode: u16, instruction_set: InstructionSet) -> T {
         use InstructionSet::SuperChip as IsSc;
         use InstructionSet::XoChip as IsXc;
-        use SuperChipInstruction as Sci;
-        use XoChipInstruction as Xci;
-        // let span = info_span!("Instruction::from_u16", name = "Instruction::from_u16").entered();
 
-        // let instruction = RawInstruction::new_with_raw_value(instruction);
-        // let disc1 = instruction.discriminant1();
-        // let x = instruction.x();
-        // let x_u8 = x.value();
-        // let y = instruction.y();
-        // let y_u8 = y.value();
-        // let n = instruction.n();
-        // let n_u8 = n.value();
-        // let kk = instruction.kk();
-        // let nnn = instruction.nnn();
-
-        let [disc1, y_u8] = ((instruction & 0xF0F0) >> 4).to_be_bytes();
-        let [x_u8, n_u8] = (instruction & 0x0F0F).to_be_bytes();
+        let [disc1, y_u8] = ((opcode & 0xF0F0) >> 4).to_be_bytes();
+        let [x_u8, n_u8] = (opcode & 0x0F0F).to_be_bytes();
         let [x, y, n] = [x_u8, y_u8, n_u8].map(|nibble| unsafe { u4::new_unchecked(nibble) });
-        let kk = (instruction & 0xFF) as u8;
-        let nnn = u12::new(instruction & 0xFFF);
-        Some(match (disc1, x_u8, y_u8, n_u8, instruction_set) {
+        let nn = (opcode & 0xFF) as u8;
+        let nnn = opcode & 0xFFF;
+
+        match (disc1, x_u8, y_u8, n_u8, instruction_set) {
             (0x10.., _, _, _, _)
             | (_, 0x10.., _, _, _)
             | (_, _, 0x10.., _, _)
             | (_, _, _, 0x10.., _) => unsafe { std::hint::unreachable_unchecked() },
-            (0x0, 0x0, 0x0, 0x0, _) => Self::Exit0,
-            (0x0, 0x0, 0xC, _, IsSc | IsXc) => Sc(Sci::ScrollDown { n }),
-            (0x0, 0x0, 0xD, _, IsXc) => Xc(Xci::ScrollUp { n }),
-            (0x0, 0x0, 0xE, 0x0, _) => Self::Cls,
-            (0x0, 0x0, 0xE, 0xE, _) => Self::Ret,
-            (0x0, 0x0, 0xF, 0xB, IsSc | IsXc) => Sc(Sci::ScrollRight),
-            (0x0, 0x0, 0xF, 0xC, IsSc | IsXc) => Sc(Sci::ScrollLeft),
-            (0x0, 0x0, 0xF, 0xD, IsSc | IsXc) => Sc(Sci::Exit),
-            (0x0, 0x0, 0xF, 0xE, IsSc | IsXc) => Sc(Sci::LoRes),
-            (0x0, 0x0, 0xF, 0xF, IsSc | IsXc) => Sc(Sci::HiRes),
-            (0x1, _, _, _, _) => Self::Jp { nnn },
-            (0x2, _, _, _, _) => Self::Call { nnn },
-            (0x3, _, _, _, _) => Self::Se(Args::XKk { x, kk }),
-            (0x4, _, _, _, _) => Self::Sne(Args::XKk { x, kk }),
-            (0x5, _, _, 0x0, _) => Self::Se(Args::XY { x, y }),
-            (0x5, _, _, 0x2, IsXc) => Xc(Xci::RegRangeToMem { x, y }),
-            (0x5, _, _, 0x3, IsXc) => Xc(Xci::RegRangeFromMem { x, y }),
-            (0x6, _, _, _, _) => Self::Ld(Args::XKk { x, kk }),
-            (0x7, _, _, _, _) => Self::Add(Args::XKk { x, kk }),
-            (0x8, _, _, 0x0, _) => Self::Ld(Args::XY { x, y }),
-            (0x8, _, _, 0x1, _) => Self::Or { x, y },
-            (0x8, _, _, 0x2, _) => Self::And { x, y },
-            (0x8, _, _, 0x3, _) => Self::Xor { x, y },
-            (0x8, _, _, 0x4, _) => Self::Add(Args::XY { x, y }),
-            (0x8, _, _, 0x5, _) => Self::Sub { x, y },
-            (0x8, _, _, 0x6, _) => Self::Shr { x, y },
-            (0x8, _, _, 0x7, _) => Self::Subn { x, y },
-            (0x8, _, _, 0xE, _) => Self::Shl { x, y },
-            (0x9, _, _, 0x0, _) => Self::Sne(Args::XY { x, y }),
-            (0xA, _, _, _, _) => Self::LdI { nnn },
-            (0xB, _, _, _, _) => Self::JpV0 { nnn },
-            (0xC, _, _, _, _) => Self::Rnd { x, kk },
-            (0xD, _, _, 0, IsSc | IsXc) => Sc(Sci::DrawLarge { x, y }),
-            (0xD, _, _, _, _) => Self::Drw { x, y, n },
-            (0xE, _, 0x9, 0xE, _) => Self::Skp { x },
-            (0xE, _, 0xA, 0x1, _) => Self::Sknp { x },
-            (0xF, 0x0, 0x0, 0x0, IsXc) => Xc(Xci::LdILong),
-            (0xF, _, 0x0, 0x1, IsXc) => Xc(Xci::SelectPlanes { x }),
-            (0xF, 0x0, 0x0, 0x2, IsXc) => Xc(Xci::WriteAudio),
-            (0xF, _, 0x0, 0x7, _) => Self::LdFromDt { x },
-            (0xF, _, 0x0, 0xA, _) => Self::LdFromKey { x },
-            (0xF, _, 0x1, 0x5, _) => Self::LdToDt { x },
-            (0xF, _, 0x1, 0x8, _) => Self::LdSt { x },
-            (0xF, _, 0x1, 0xE, _) => Self::AddI { x },
-            (0xF, _, 0x2, 0x9, _) => Self::LdF { x },
-            (0xF, _, 0x3, 0x0, IsSc | IsXc) => Sc(Sci::LdHiResF { x }),
-            (0xF, _, 0x3, 0x3, _) => Self::LdB { x },
-            (0xF, _, 0x3, 0xA, IsXc) => Xc(Xci::SetPitch { x }),
-            (0xF, _, 0x5, 0x5, _) => Self::LdToSlice { x },
-            (0xF, _, 0x6, 0x5, _) => Self::LdFromSlice { x },
-            (0xF, _, 0x7, 0x5, IsSc | IsXc) => Sc(Sci::StoreRegs { x }),
-            (0xF, _, 0x8, 0x5, IsSc | IsXc) => Sc(Sci::GetRegs { x }),
-            _ => return None,
+            (0x0, 0x0, 0x0, 0x0, _) => self.execute_0000(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xC, _, IsSc | IsXc) => self.execute_00Cn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xD, _, IsXc) => self.execute_00Dn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xE, 0x0, _) => self.execute_00E0(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xE, 0xE, _) => self.execute_00EE(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xF, 0xB, IsSc | IsXc) => self.execute_00FB(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xF, 0xC, IsSc | IsXc) => self.execute_00FC(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xF, 0xD, IsSc | IsXc) => self.execute_00FD(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xF, 0xE, IsSc | IsXc) => self.execute_00FE(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x0, 0x0, 0xF, 0xF, IsSc | IsXc) => self.execute_00FF(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x1, _, _, _, _) => self.execute_1nnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x2, _, _, _, _) => self.execute_2nnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x3, _, _, _, _) => self.execute_3xnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x4, _, _, _, _) => self.execute_4xnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x5, _, _, 0x0, _) => self.execute_5xy0(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x5, _, _, 0x2, IsXc) => self.execute_5xy2(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x5, _, _, 0x3, IsXc) => self.execute_5xy3(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x6, _, _, _, _) => self.execute_6xnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x7, _, _, _, _) => self.execute_7xnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x0, _) => self.execute_8xy0(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x1, _) => self.execute_8xy1(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x2, _) => self.execute_8xy2(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x3, _) => self.execute_8xy3(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x4, _) => self.execute_8xy4(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x5, _) => self.execute_8xy5(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x6, _) => self.execute_8xy6(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0x7, _) => self.execute_8xy7(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x8, _, _, 0xE, _) => self.execute_8xyE(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0x9, _, _, 0x0, _) => self.execute_9xy0(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xA, _, _, _, _) => self.execute_Annn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xB, _, _, _, _) => self.execute_Bnnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xC, _, _, _, _) => self.execute_Cxnn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xD, _, _, 0, IsSc | IsXc) => self.execute_Dxy0(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xD, _, _, _, _) => self.execute_Dxyn(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xE, _, 0x9, 0xE, _) => self.execute_Ex9E(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xE, _, 0xA, 0x1, _) => self.execute_ExA1(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, 0x0, 0x0, 0x0, IsXc) => self.execute_F000(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x0, 0x1, IsXc) => self.execute_Fx01(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, 0x0, 0x0, 0x2, IsXc) => self.execute_F002(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x0, 0x7, _) => self.execute_Fx07(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x0, 0xA, _) => self.execute_Fx0A(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x1, 0x5, _) => self.execute_Fx15(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x1, 0x8, _) => self.execute_Fx18(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x1, 0xE, _) => self.execute_Fx1E(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x2, 0x9, _) => self.execute_Fx29(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x3, 0x0, IsSc | IsXc) => self.execute_Fx30(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x3, 0x3, _) => self.execute_Fx33(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x3, 0xA, IsXc) => self.execute_Fx3A(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x5, 0x5, _) => self.execute_Fx55(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x6, 0x5, _) => self.execute_Fx65(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x7, 0x5, IsSc | IsXc) => self.execute_Fx75(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            (0xF, _, 0x8, 0x5, IsSc | IsXc) => self.execute_Fx85(x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+            _ => self.no_match(opcode, x, y, n, x_u8, y_u8, n_u8, nn, nnn),
+        }
+    }
+
+    fn execute_0000(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00Cn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00Dn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00E0(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00EE(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00FB(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00FC(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00FD(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00FE(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_00FF(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_1nnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_2nnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_3xnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_4xnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_5xy0(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_5xy2(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_5xy3(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_6xnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_7xnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy0(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy1(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy2(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy3(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy4(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy5(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy6(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xy7(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_8xyE(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_9xy0(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Annn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Bnnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Cxnn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Dxy0(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Dxyn(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Ex9E(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_ExA1(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_F000(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx01(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_F002(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx07(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx0A(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx15(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx18(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx1E(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx29(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx30(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx33(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx3A(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx55(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx65(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx75(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn execute_Fx85(&mut self, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+    fn no_match(&mut self, instruction: u16, x: u4, y: u4, n: u4, x_u8: u8, y_u8: u8, n_u8: u8, nn: u8, nnn: u16) -> T;
+}
+
+pub struct OctoSyntax<'a>(pub &'a Quirks, pub Option<u16>);
+
+impl ExecuteInstruction<Option<String>> for OctoSyntax<'_> {
+    match_execute! {Option<String>, self, x, y, n, x_u8, y_u8, n_u8, nn, nnn;
+        _0000 => if self.0.graceful_exit_on_0000 {
+            Some("exit-0000".to_owned())
+        } else {
+            None
+        }
+        _00Cn => format!("scroll-down {n:#X}")
+        _00Dn => format!("scroll-up {n:#X}")
+        _00E0 => "clear".to_owned()
+        _00EE => "return".to_owned()
+        _00FB => "scroll-right".to_owned()
+        _00FC => "scroll-left".to_owned()
+        _00FD => "exit".to_owned()
+        _00FE => "lores".to_owned()
+        _00FF => "hires".to_owned()
+        _1nnn => format!("jump {nnn:#05X}")
+        _2nnn => format!(":call {nnn:#05X}")
+        _3xnn => format!("if v{x:X} != {nn:#04X} then")
+        _4xnn => format!("if v{x:X} == {nn:#04X} then")
+        _5xy0 => format!("if v{x:X} != v{y:X} then")
+        _5xy2 => format!("save v{x:X} - v{y:X}")
+        _5xy3 => format!("load v{x:X} - v{y:X}")
+        _6xnn => format!("v{x:X} := {nn:#04X}")
+        _7xnn => format!("v{x:X} += {nn:#04X}")
+        _8xy0 => format!("v{x:X} := v{y:X}")
+        _8xy1 => format!("v{x:X} |= v{y:X}")
+        _8xy2 => format!("v{x:X} &= v{y:X}")
+        _8xy3 => format!("v{x:X} ^= v{y:X}")
+        _8xy4 => format!("v{x:X} += v{y:X}")
+        _8xy5 => format!("v{x:X} -= v{y:X}")
+        _8xy6 => format!("v{x:X} >>= {:X}", if self.0.bitshift_use_y { y } else { x })
+        _8xy7 => format!("v{x:X} =- v{y:X}")
+        _8xyE => format!("v{x:X} <<= {:X}", if self.0.bitshift_use_y { y } else { x })
+        _9xy0 => format!("if v{x:X} == v{y:X} then")
+        _Annn => format!("i := {nnn:#05X}")
+        _Bnnn => if self.0.jump_v0_use_vx { format!("jump0 {nnn:#05X}") } else { format!("jump0 {nnn:#05X} + v{x:X}") }
+        _Cxnn => format!("vX := random {nn:#04X}")
+        _Dxy0 => format!("sprite v{x:X} v{y:X} 0")
+        _Dxyn => format!("sprite v{x:X} v{y:X} {n:#X}")
+        _Ex9E => format!("if v{x:X} -key then")
+        _ExA1 => format!("if v{x:X} key then")
+        _F000 => format!("i := long {}", match self.1.take() {
+            Some(nnnn) => format!("{nnnn:#06X}"),
+            None => "0x????".to_owned()
         })
+        _Fx01 => format!("plane {x:#X}")
+        _F002 => "audio".to_owned()
+        _Fx07 => format!("v{x:X} := delay")
+        _Fx0A => format!("v{x:X} := key")
+        _Fx15 => format!("delay := v{x:X}")
+        _Fx18 => format!("buzzer := v{x:X}")
+        _Fx1E => format!("i += v{x:X}")
+        _Fx29 => format!("i := hex v{x:X}")
+        _Fx30 => format!("i := bighex v{x:X}")
+        _Fx33 => format!("bcd v{x:X}")
+        _Fx3A => format!("pitch := v{x:X}")
+        _Fx55 => format!("save v{x:X}")
+        _Fx65 => format!("load v{x:X}")
+        _Fx75 => format!("saveflags v{x:X}")
+        _Fx85 => format!("loadflags v{x:X}")
+    }
+
+    fn no_match(
+        &mut self,
+        _instruction: u16,
+        _x: u4,
+        _y: u4,
+        _n: u4,
+        _x_u8: u8,
+        _y_u8: u8,
+        _n_u8: u8,
+        _nn: u8,
+        _nnn: u16,
+    ) -> Option<String> {
+        None
     }
 }
 

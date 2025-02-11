@@ -44,10 +44,12 @@ pub const NEUTRAL_ACCENT: Color32 = CINEROUS;
 
 const PIXEL_CODE_FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/assets/PixelCode/PixelCode.otf"
+    "/assets/PixelCode/patched/PixelCode.otf"
 ));
 
 const OUTLINE_STROKE_WIDTH: f32 = 2.0;
+
+pub const LARGE_BUTTON_SIZE: egui::Vec2 = egui::vec2(36.0, 36.0);
 
 pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColor>) {
     contexts.ctx_mut().all_styles_mut(|style| {
@@ -123,6 +125,16 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
             }),
         ),
     );
+    fonts.font_data.insert(
+        "Pixel Code Raised".to_owned(),
+        Arc::new(
+            egui::FontData::from_static(PIXEL_CODE_FONT).tweak(egui::FontTweak {
+                scale: 1.2,
+                y_offset_factor: -0.143,
+                ..Default::default()
+            }),
+        ),
+    );
     let fallback_order = vec![
         "Pixel Code".to_owned(),
         "NotoEmoji-Regular".to_owned(),
@@ -134,6 +146,9 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
     fonts
         .families
         .insert(egui::FontFamily::Monospace, fallback_order);
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("Pixel Code Raised".into()), vec!["Pixel Code Raised".to_owned()]);
     contexts.ctx_mut().set_fonts(fonts);
 
     clear_color.0 = egui_to_bevy_color(BACKGROUND_DARK);

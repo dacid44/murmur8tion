@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::BTreeSet, fmt::Display};
 
 use arbitrary_int::{u4, Number};
 use bevy::log::warn;
@@ -35,6 +35,14 @@ pub enum Error {
     UnsupportedScreenOperation(#[from] screen::UnsupportedScreenOperation),
 }
 
+#[derive(Debug, Clone)]
+pub enum TickResult {
+    Continue,
+    Exit,
+    HitBreakpoint,
+    Error(Error),
+}
+
 fn format_range(start: u16, offset: usize, inclusive: bool) -> String {
     let end = (start as usize) + offset;
     if inclusive {
@@ -57,17 +65,41 @@ pub trait Machine: Send + Sync {
     fn quirks(&self) -> &Quirks;
     fn instruction_set(&self) -> InstructionSet;
     fn tick(&mut self) -> Result<bool>;
-    fn tick_many(&mut self, count: u32) -> Result<bool> {
-        self.tick()?;
-        self.disable_vblank();
-        for _ in 1..count {
-            self.tick()?;
-            // coz::progress!("machine_tick")
-            // if self.tick()? {
-            //     return Ok(true)
-            // }
+    fn tick_many(&mut self, count: u32, breakpoints: &BTreeSet<u16>) -> TickResult {
+        macro_rules! tick {
+            () => {
+                match self.tick() {
+                    Ok(false) => {}
+                    Ok(true) => return TickResult::Exit,
+                    Err(error) => return TickResult::Error(error),
+                }
+            };
         }
-        Ok(false)
+
+        if breakpoints.is_empty() {
+            if count > 0 {
+                tick!();
+                self.disable_vblank();
+            }
+            for _ in 1..count {
+                tick!();
+            }
+        } else {
+            if count > 0 {
+                if breakpoints.contains(&self.cpu().pc) {
+                    return TickResult::HitBreakpoint;
+                }
+                tick!();
+                self.disable_vblank();
+            }
+            for _ in 1..count {
+                if breakpoints.contains(&self.cpu().pc) {
+                    return TickResult::HitBreakpoint;
+                }
+                tick!();
+            }
+        }
+        TickResult::Continue
     }
 }
 
@@ -169,7 +201,7 @@ impl Machine for DynamicMachine {
     dynamic_machine_method!(quirks(self: &Self) -> &Quirks);
     dynamic_machine_method!(instruction_set(self: &Self) -> InstructionSet);
     dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
-    dynamic_machine_method!(tick_many(self: &mut Self, count: u32) -> Result<bool>);
+    dynamic_machine_method!(tick_many(self: &mut Self, count: u32, breakpoints: &BTreeSet<u16>) -> TickResult);
 }
 
 #[derive(Clone)]

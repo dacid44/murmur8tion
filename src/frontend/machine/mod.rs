@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
 use arbitrary_int::u4;
 use async_channel::{Receiver, Sender};
@@ -12,7 +15,7 @@ use image::RgbaImage;
 use keymap::KeyMapping;
 
 use crate::{
-    hardware::{self, DynamicMachine, KeyEvent, Machine as HardwareMachine},
+    hardware::{self, DynamicMachine, KeyEvent, Machine as HardwareMachine, TickResult},
     model::{CosmacVip, Model},
 };
 
@@ -38,12 +41,14 @@ pub enum ToMachine {
     Step,
     SetFrequency(f64),
     SetIpf(u32),
+    SetBreakpoint(u16, bool),
+    ClearBreakpoints,
     Exit,
 }
 
 struct FrameEvent {
     machine: Option<DynamicMachine>,
-    error: Option<hardware::Error>,
+    result: hardware::TickResult,
     frame_time: Duration,
     audio_status: AudioStatus,
 }
@@ -139,10 +144,11 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
     let (frame_tx, frame_rx) = async_channel::unbounded();
     std::thread::spawn(move || {
         let mut machine = None;
-        let mut error = None;
+        let mut result = TickResult::Continue;
         let mut paused = false;
         let mut timestep = Duration::from_secs_f64(1.0 / frequency);
         let mut ipf = ipf;
+        let mut breakpoints = BTreeSet::new();
         let mut ts = Instant::now();
         let mut last_frame = ts;
         'outer: loop {
@@ -152,7 +158,7 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
             frame_tx
                 .try_send(FrameEvent {
                     machine: machine.clone(),
-                    error: error.as_ref().filter(|_| machine.is_some()).cloned(),
+                    result: result.clone(),
                     frame_time,
                     audio_status: match (
                         machine
@@ -167,45 +173,68 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
                 })
                 .expect("Failed to send frame, receiver disconnected");
 
-            if error.is_some() {
+            if matches!(result, TickResult::Error(_) | TickResult::Exit) {
                 machine = None;
+            }
+            match result {
+                TickResult::Continue => {}
+                TickResult::Exit => machine = None,
+                TickResult::HitBreakpoint => {
+                    paused = true;
+                }
+                TickResult::Error(_) => {
+                    machine = None;
+                    result = TickResult::Exit;
+                }
             }
 
             let mut inputs = Vec::new();
+            let mut tick_once = false;
             while let Ok(message) = rx.try_recv() {
                 match message {
                     ToMachine::Input(key, event) => inputs.push((key, event)),
                     ToMachine::ResetMachine(new_machine) => {
                         machine = Some(new_machine);
-                        error = None;
+                        result = TickResult::Continue;
                     }
                     ToMachine::Pause(pause) => paused = pause,
                     ToMachine::Step => {
-                        if let Some(machine) =
-                            machine.as_mut().filter(|_| error.is_none())
-                        {
-                            println!("stepping");
-                            if let Err(err) = machine.tick() {
-                                error = Some(err);
-                            }
-                        }
+                        tick_once = true;
                     }
                     ToMachine::SetFrequency(frequency) => {
                         timestep = Duration::from_secs_f64(1.0 / frequency)
                     }
                     ToMachine::SetIpf(new_ipf) => ipf = new_ipf,
+                    ToMachine::SetBreakpoint(address, enabled) => {
+                        if enabled {
+                            breakpoints.insert(address);
+                        } else {
+                            breakpoints.remove(&address);
+                        }
+                    }
+                    ToMachine::ClearBreakpoints => {
+                        breakpoints.clear();
+                    }
                     ToMachine::Exit => break 'outer,
                 }
             }
 
-            if let Some(machine) = machine.as_mut().filter(|_| !paused && error.is_none()) {
+            if let Some(machine) = machine.as_mut() {
                 for (key, event) in inputs {
                     machine.event(key, event);
                 }
-                machine.tick_timers();
-                if let Err(err) = machine.tick_many(ipf) {
-                    error = Some(err);
+
+                if !paused {
+                    machine.tick_timers();
                 }
+                let (num_instructions, breakpoints) = if tick_once {
+                    (1, &BTreeSet::new())
+                } else if paused {
+                    (0, &BTreeSet::new())
+                } else {
+                    (ipf, &breakpoints)
+                };
+                result = machine.tick_many(num_instructions, breakpoints);
             }
 
             let now = Instant::now();
@@ -222,6 +251,7 @@ fn handle_machine(
     mut machine: ResMut<Machine>,
     key_mapping: Res<KeyMapping>,
     mut key_events: EventReader<KeyboardInput>,
+    mut emulator_data: ResMut<EmulatorData>,
     mut diagnostics: Diagnostics,
     exit: EventReader<AppExit>,
 ) -> Vec<(AudioStatus, u8, [u8; 16])> {
@@ -248,8 +278,10 @@ fn handle_machine(
             machine.initialized = true;
             machine.machine = event_machine;
         }
-        if let Some(error) = event.error {
-            error!("Emulator error: {error}");
+        match event.result {
+            TickResult::Continue | TickResult::Exit => {}
+            TickResult::HitBreakpoint => emulator_data.paused = true,
+            TickResult::Error(error) => error!("Emulator error: {error}"),
         }
         machine_audio.push((
             event.audio_status,

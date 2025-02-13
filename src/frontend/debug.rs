@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     f32,
     fmt::{Display, UpperHex},
     ops::{Sub, SubAssign},
@@ -22,7 +23,7 @@ use super::{
     layout::ScaleToDisplay,
     machine::{Machine, ToMachine},
     ui::style,
-    EmulatorData, Frame, FRAME_ASPECT_RATIO,
+    EmulatorData, EmulatorEvent, Frame, FRAME_ASPECT_RATIO,
 };
 
 #[derive(Resource, Clone, Default)]
@@ -176,77 +177,74 @@ pub struct DebuggerState {
     last_pc: u16,
     scroll_offset: f32,
     is_odd: Option<bool>,
+    breakpoints: BTreeSet<usize>,
 }
 
 pub fn debugger_ui(
     ui: InMut<Ui>,
-    machine: Option<Res<Machine>>,
+    machine: Res<Machine>,
     mut emulator_data: ResMut<EmulatorData>,
+    mut emulator_events: EventWriter<EmulatorEvent>,
     mut state: Local<DebuggerState>,
 ) {
     ui.0.horizontal(|ui| {
-        if large_button(ui, "▶", !emulator_data.paused, true).clicked() {
+        if large_button(ui, "▶", false, !emulator_data.paused)
+            .on_hover_text("Resume")
+            .clicked()
+        {
             emulator_data.paused = false;
         }
-        if large_button(ui, "⏸", emulator_data.paused, true).clicked() {
+        if large_button(ui, "⏸", false, emulator_data.paused)
+            .on_hover_text("Pause")
+            .clicked()
+        {
             emulator_data.paused = true;
         }
 
-        if large_button(ui, "»", false, false).clicked() {
-            if let Some(machine) = machine.as_ref() {
-                machine.tx.try_send(ToMachine::Step).unwrap();
-            }
+        if large_button(ui, "»", true, false)
+            .on_hover_text("Next Instruction")
+            .clicked()
+        {
+            machine.tx.try_send(ToMachine::Step).unwrap();
+        }
+
+        if large_button(ui, "⟲", true, false)
+            .on_hover_text("Reset")
+            .clicked()
+        {
+            emulator_events.send(EmulatorEvent::ResetMachine);
         }
     });
 
     ui.0.horizontal(|ui| {
+        ui.label("Parity:");
         ui.selectable_value(&mut state.is_odd, Some(false), "Even");
         ui.selectable_value(&mut state.is_odd, Some(true), "Odd");
-        ui.selectable_value(&mut state.is_odd, None, "Follow PC");
+        ui.selectable_value(&mut state.is_odd, None, "PC");
     });
 
-    let (memory, pc, quirks, instruction_set) = machine
-        .as_ref()
-        .map(|machine| {
-            (
-                machine.machine.memory(),
-                machine.machine.cpu().pc,
-                machine.machine.quirks(),
-                machine.machine.instruction_set(),
-            )
-        })
-        .unwrap_or((&[], 0x200, &CosmacVip::QUIRKS, InstructionSet::CosmacVip));
+    if ui.0.button("Clear all breakpoints").clicked() {
+        state.breakpoints.clear();
+        machine.tx.try_send(ToMachine::ClearBreakpoints).unwrap();
+    }
+
+    let memory = machine.machine.memory();
+    let pc = machine.machine.cpu().pc;
+    let quirks = machine.machine.quirks();
+    let instruction_set = machine.machine.instruction_set();
+
     let pc_usize = pc as usize;
     let is_odd = state.is_odd.unwrap_or(pc % 2 == 1);
     let num_rows = (memory.len() / 2).saturating_sub(is_odd as usize);
     let text_height = ui.0.text_style_height(&egui::TextStyle::Body);
 
-    state.scroll_offset = egui::ScrollArea::vertical()
-        .auto_shrink(false)
-        .show_rows(ui.0, text_height, num_rows, |ui, rows| {
-            let spacing = ui.style().spacing.item_spacing.x;
+    ui.0.group(|ui| {
+        state.scroll_offset = egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show_rows(ui, text_height, num_rows, |ui, rows| {
+                let spacing = ui.style().spacing.item_spacing.x;
 
-            if pc != state.last_pc {
-                let scroll_row = if pc == 0 {
-                    pc_usize + (pc % 2 == 1 && is_odd) as usize
-                } else {
-                    pc_usize - (pc % 2 == 1 && is_odd) as usize
-                } / 2;
-                let top = (text_height + ui.style().spacing.item_spacing.y) * scroll_row as f32
-                    - state.scroll_offset;
-                let bottom = top + text_height;
-
-                ui.scroll_to_rect_animation(
-                    egui::Rect::from_x_y_ranges(ui.clip_rect().x_range(), top..=bottom),
-                    Some(egui::Align::Center),
-                    ScrollAnimation::none(),
-                );
-
-                state.last_pc = pc;
-            }
-
-            for row in rows {
-                ui.horizontal(|ui| {
+                for row in rows {
                     let address = row * 2 + (is_odd as usize);
                     let pc_color = if pc_usize == address {
                         Some(style::ACCENT_LIGHT)
@@ -256,32 +254,145 @@ pub fn debugger_ui(
                         None
                     };
 
-                    ui.colored_label(
-                        pc_color.unwrap_or(style::FOREGROUND_MID),
-                        format!("{address:04X}:"),
-                    );
-                    ui.add_space(spacing);
-
-                    let color = pc_color.unwrap_or(style::FOREGROUND_LIGHT);
-                    if let Some((opcode, long_address, instruction)) =
-                        get_opcode(memory, address, quirks, instruction_set)
-                    {
+                    ui.horizontal(|ui| {
                         ui.colored_label(
-                            color,
-                            match long_address {
-                                Some(addr) => format!("{opcode:04X} {addr:04X}"),
-                                None => format!("{opcode:04X}     "),
-                            },
+                            pc_color.unwrap_or(style::FOREGROUND_MID),
+                            format!("{address:04X}:"),
                         );
-                        ui.add_space(spacing * 2.0);
-                        ui.colored_label(color, instruction);
-                    }
-                });
+                        if let Some(breakpoint) =
+                            breakpoint_button(ui, &mut state.breakpoints, address).inner
+                        {
+                            machine
+                                .tx
+                                .try_send(ToMachine::SetBreakpoint(address as u16, breakpoint))
+                                .unwrap();
+                        }
+
+                        let color = pc_color.unwrap_or(style::FOREGROUND_LIGHT);
+                        if let Some(OpcodeInfo {
+                            opcode,
+                            is_long_operand,
+                            long_operand,
+                            instruction,
+                        }) = get_opcode(memory, address, quirks, instruction_set)
+                        {
+                            let color = if is_long_operand {
+                                style::NEUTRAL_MID
+                            } else {
+                                color
+                            };
+                            ui.colored_label(
+                                color,
+                                match long_operand {
+                                    Some(addr) => format!("{opcode:04X} {addr:04X}"),
+                                    None => format!("{opcode:04X}     "),
+                                },
+                            );
+                            ui.add_space(spacing * 2.0);
+                            ui.colored_label(color, instruction);
+                        }
+                    });
+                }
+
+                if pc != state.last_pc {
+                    let scroll_row = if pc == 0 {
+                        pc_usize + (pc % 2 == 1 && is_odd) as usize
+                    } else {
+                        pc_usize - (pc % 2 == 1 && is_odd) as usize
+                    } / 2;
+                    let top = (text_height + ui.style().spacing.item_spacing.y) * scroll_row as f32
+                        - state.scroll_offset;
+                    let bottom = top + text_height;
+
+                    ui.scroll_to_rect_animation(
+                        egui::Rect::from_x_y_ranges(ui.clip_rect().x_range(), top..=bottom),
+                        Some(egui::Align::Center),
+                        ScrollAnimation::none(),
+                    );
+
+                    state.last_pc = pc;
+                }
+            })
+            .state
+            .offset
+            .y;
+    });
+}
+
+fn breakpoint_button(
+    ui: &mut Ui,
+    breakpoints: &mut BTreeSet<usize>,
+    address: usize,
+) -> egui::InnerResponse<Option<bool>> {
+    let selected = breakpoints.contains(&address);
+
+    let painter = ui.painter();
+    let font = egui::FontId::new(
+        egui::TextStyle::Button.resolve(ui.style()).size,
+        egui::FontFamily::Name("Pixel Code SlightlyRaised".into()),
+    );
+    let wrap_width = ui.available_width();
+
+    let desired_size = painter
+        .layout(
+            " ".to_owned(),
+            font.clone(),
+            egui::Color32::TRANSPARENT,
+            wrap_width,
+        )
+        .size();
+    // desired_size.y = desired_size.y.at_least(ui.spacing().interact_size.y);
+    let (rect, response) = ui.allocate_at_least(desired_size, egui::Sense::click());
+
+    let (text, color) = match (
+        selected,
+        response.is_pointer_button_down_on(),
+        response.hovered(),
+    ) {
+        (false, false, false) => (" ", egui::Color32::TRANSPARENT),
+        (false, false, true) => ("○", style::FOREGROUND_LIGHT),
+        (false, true, _) => ("○", style::ACCENT_MID),
+        (true, false, false) => ("●", style::ACCENT_MID),
+        (true, false, true) => ("●", style::FOREGROUND_LIGHT),
+        (true, true, _) => ("○", style::ACCENT_MID),
+    };
+
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            text,
+        )
+    });
+
+    if ui.is_rect_visible(response.rect) {
+        let text_pos = ui.layout().align_size_within_rect(desired_size, rect).min;
+        ui.painter()
+            .text(text_pos, egui::Align2::LEFT_TOP, text, font, color);
+    }
+
+    egui::InnerResponse::new(
+        if response.clicked() {
+            if selected {
+                breakpoints.remove(&address);
+                Some(false)
+            } else {
+                breakpoints.insert(address);
+                Some(true)
             }
-        })
-        .state
-        .offset
-        .y;
+        } else {
+            None
+        },
+        response,
+    )
+}
+
+struct OpcodeInfo {
+    opcode: u16,
+    is_long_operand: bool,
+    long_operand: Option<u16>,
+    instruction: String,
 }
 
 fn get_opcode(
@@ -289,43 +400,62 @@ fn get_opcode(
     address: usize,
     quirks: &Quirks,
     instruction_set: InstructionSet,
-) -> Option<(u16, Option<u16>, String)> {
-    let opcode = u16::from_be_bytes([*memory.get(address)?, *memory.get(address + 1)?]);
-    let next_word = memory
-        .get(address + 2)
-        .zip(memory.get(address + 3))
-        .map(|(left, right)| u16::from_be_bytes([*left, *right]));
+) -> Option<OpcodeInfo> {
     let last_word = address
         .checked_sub(2)
         .and_then(|addr| memory.get(addr).zip(memory.get(addr + 1)))
         .map(|(left, right)| u16::from_be_bytes([*left, *right]));
+    let word = u16::from_be_bytes([*memory.get(address)?, *memory.get(address + 1)?]);
+    let next_word = memory
+        .get(address + 2)
+        .zip(memory.get(address + 3))
+        .map(|(left, right)| u16::from_be_bytes([*left, *right]));
+
+    let (is_long_operand, last_can_skip) = last_word
+        .map(|last_word| {
+            let mut last_parser = OctoSyntax(quirks, Some(word));
+            let last_can_skip = last_parser
+                .execute(last_word, instruction_set)
+                .is_some_and(|last_instruction| last_instruction.ends_with("then"));
+            (last_parser.1.is_none(), last_can_skip)
+        })
+        .unwrap_or((false, false));
 
     let mut parser = OctoSyntax(quirks, next_word);
-    let Some(mut instruction) = parser.execute(opcode, instruction_set) else {
-        return Some((opcode, None, "????".to_owned()));
+    let Some(mut instruction) = parser.execute(word, instruction_set) else {
+        return Some(OpcodeInfo {
+            opcode: word,
+            is_long_operand,
+            long_operand: None,
+            instruction: "????".to_owned(),
+        });
     };
-    if last_word
-        .and_then(|last_opcode| OctoSyntax(quirks, None).execute(last_opcode, instruction_set))
-        .is_some_and(|instruction| instruction.ends_with("then"))
-    {
+
+    if last_can_skip {
         instruction.insert_str(0, "    ");
     }
-    Some((opcode, parser.1.xor(next_word), instruction))
+
+    Some(OpcodeInfo {
+        opcode: word,
+        is_long_operand,
+        long_operand: parser.1.xor(next_word),
+        instruction,
+    })
 }
 
 fn large_button(
     ui: &mut Ui,
     label: impl Into<String>,
-    raised_text: bool,
+    slightly_raised_text: bool,
     selected: bool,
 ) -> egui::Response {
     ui.add(
         egui::Button::new(
             egui::RichText::new(label)
-                .family(if raised_text {
-                    egui::FontFamily::Name("Pixel Code Raised".into())
+                .family(if slightly_raised_text {
+                    egui::FontFamily::Name("Pixel Code SlightlyRaised".into())
                 } else {
-                    egui::FontFamily::Proportional
+                    egui::FontFamily::Name("Pixel Code Raised".into())
                 })
                 .size(egui::TextStyle::Button.resolve(ui.style()).size * 2.0),
         )

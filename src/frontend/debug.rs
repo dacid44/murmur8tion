@@ -2,12 +2,12 @@ use std::{
     collections::BTreeSet,
     f32,
     fmt::{Display, UpperHex},
-    ops::{Sub, SubAssign},
+    ops::SubAssign,
 };
 
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{self, style::ScrollAnimation, Ui, WidgetText},
+    egui::{self, style::ScrollAnimation, Ui},
     EguiContexts,
 };
 use bevy_inspector_egui::bevy_inspector;
@@ -16,7 +16,7 @@ use range_vec::RangeVec;
 use crate::{
     hardware::{self, Machine as HardwareMachine},
     instruction::{ExecuteInstruction, InstructionSet, OctoSyntax},
-    model::{CosmacVip, Quirks},
+    model::Quirks,
 };
 
 use super::{

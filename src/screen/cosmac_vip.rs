@@ -32,6 +32,7 @@ impl Screen for CosmacVipScreen {
         bytemuck::fill_zeroes(&mut self.0);
     }
 
+    #[inline(always)]
     fn draw_sprite(&mut self, x: u8, y: u8, sprite: &[u8]) -> bool {
         // let span = info_span!("CosmacVipScreen::draw_sprite", name = "CosmacVipScreen::draw_sprite").entered();
         sprite

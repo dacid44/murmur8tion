@@ -18,6 +18,8 @@ use crate::{
 
 #[derive(Error, Debug, Clone)]
 pub enum Error {
+    #[error("normal exit")]
+    Exit,
     #[error("invalid instruction '{0:#06X}'")]
     InvalidInstruction(u16),
     #[error("ret was called with no return value on the stack")]
@@ -33,14 +35,6 @@ pub enum Error {
     },
     #[error("an unsupported screen operation was run")]
     UnsupportedScreenOperation(#[from] screen::UnsupportedScreenOperation),
-}
-
-#[derive(Debug, Clone)]
-pub enum TickResult {
-    Continue,
-    Exit,
-    HitBreakpoint,
-    Error(Error),
 }
 
 fn format_range(start: u16, offset: usize, inclusive: bool) -> String {
@@ -64,42 +58,32 @@ pub trait Machine: Send + Sync {
     fn cpu(&self) -> &Cpu;
     fn quirks(&self) -> &Quirks;
     fn instruction_set(&self) -> InstructionSet;
-    fn tick(&mut self) -> Result<bool>;
-    fn tick_many(&mut self, count: u32, breakpoints: &BTreeSet<u16>) -> TickResult {
-        macro_rules! tick {
-            () => {
-                match self.tick() {
-                    Ok(false) => {}
-                    Ok(true) => return TickResult::Exit,
-                    Err(error) => return TickResult::Error(error),
-                }
-            };
-        }
-
+    fn tick(&mut self) -> Result<()>;
+    fn tick_many(&mut self, count: u32, breakpoints: &BTreeSet<u16>) -> Result<bool> {
         if breakpoints.is_empty() {
             if count > 0 {
-                tick!();
+                self.tick()?;
                 self.disable_vblank();
             }
             for _ in 1..count {
-                tick!();
+                self.tick()?;
             }
         } else {
             if count > 0 {
                 if breakpoints.contains(&self.cpu().pc) {
-                    return TickResult::HitBreakpoint;
+                    return Ok(true);
                 }
-                tick!();
+                self.tick()?;
                 self.disable_vblank();
             }
             for _ in 1..count {
                 if breakpoints.contains(&self.cpu().pc) {
-                    return TickResult::HitBreakpoint;
+                    return Ok(true);
                 }
-                tick!();
+                self.tick()?;
             }
         }
-        TickResult::Continue
+        Ok(false)
     }
 }
 
@@ -127,7 +111,7 @@ where
     blanket_machine_method!(cpu(self: &Self) -> &Cpu);
     blanket_machine_method!(quirks(self: &Self) -> &Quirks);
     blanket_machine_method!(instruction_set(self: &Self) -> InstructionSet);
-    blanket_machine_method!(tick(self: &mut Self) -> Result<bool>);
+    blanket_machine_method!(tick(self: &mut Self) -> Result<()>);
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -200,8 +184,8 @@ impl Machine for DynamicMachine {
     dynamic_machine_method!(cpu(self: &Self) -> &Cpu);
     dynamic_machine_method!(quirks(self: &Self) -> &Quirks);
     dynamic_machine_method!(instruction_set(self: &Self) -> InstructionSet);
-    dynamic_machine_method!(tick(self: &mut Self) -> Result<bool>);
-    dynamic_machine_method!(tick_many(self: &mut Self, count: u32, breakpoints: &BTreeSet<u16>) -> TickResult);
+    dynamic_machine_method!(tick(self: &mut Self) -> Result<()>);
+    dynamic_machine_method!(tick_many(self: &mut Self, count: u32, breakpoints: &BTreeSet<u16>) -> Result<bool>);
 }
 
 #[derive(Clone)]
@@ -471,20 +455,20 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> Chip8<Model, Screen> 
     }
 
     // Returns a boolean specifying whether to exit
-    pub fn tick(&mut self) -> Result<bool> {
+    pub fn tick(&mut self) -> Result<()> {
         let instruction = self.read_word()?;
         self.cpu.inc_pc();
         self.execute(instruction, self.model.instruction_set())
     }
 }
 
-impl<Model: model::Model, Screen: screen::Screen + ?Sized> ExecuteInstruction<Result<bool>>
+impl<Model: model::Model, Screen: screen::Screen + ?Sized> ExecuteInstruction<Result<()>>
     for Chip8<Model, Screen>
 {
-    match_execute! { Result<bool>, self, x, y, n, x_u8, y_u8, n_u8, nn, nnn; Ok(false);
+    match_execute! { Result<()>, self, x, y, n, x_u8, y_u8, n_u8, nn, nnn; Ok(());
         _0000 => {
             if self.model.quirks().graceful_exit_on_0000 {
-                return Ok(true);
+                return Err(Error::Exit);
             } else {
                 return Err(Error::InvalidInstruction(0x0000));
             }
@@ -508,7 +492,7 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> ExecuteInstruction<Re
             self.screen.scroll_left()?;
         }
         _00FD => {
-            return Ok(true);
+            return Err(Error::Exit);
         }
         _00FE => {
             self.screen.set_hires(false)?;
@@ -795,7 +779,7 @@ impl<Model: model::Model, Screen: screen::Screen + ?Sized> ExecuteInstruction<Re
         _n_u8: u8,
         _nn: u8,
         _nnn: u16,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         self.cpu.dec_pc();
         Err(Error::InvalidInstruction(instruction))
     }

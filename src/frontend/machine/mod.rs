@@ -15,7 +15,7 @@ use image::RgbaImage;
 use keymap::KeyMapping;
 
 use crate::{
-    hardware::{self, DynamicMachine, KeyEvent, Machine as HardwareMachine, TickResult},
+    hardware::{self, DynamicMachine, KeyEvent, Machine as HardwareMachine},
     model::{CosmacVip, Model},
 };
 
@@ -48,9 +48,17 @@ pub enum ToMachine {
 
 struct FrameEvent {
     machine: Option<DynamicMachine>,
-    result: hardware::TickResult,
+    result: TickResult,
     frame_time: Duration,
     audio_status: AudioStatus,
+}
+
+#[derive(Debug, Clone)]
+pub enum TickResult {
+    Continue,
+    Exit,
+    HitBreakpoint,
+    Error(hardware::Error),
 }
 
 enum AudioStatus {
@@ -234,7 +242,12 @@ fn spawn_machine_thread(frequency: f64, ipf: u32) -> (Sender<ToMachine>, Receive
                 } else {
                     (ipf, &breakpoints)
                 };
-                result = machine.tick_many(num_instructions, breakpoints);
+                result = match machine.tick_many(num_instructions, breakpoints) {
+                    Ok(false) => TickResult::Continue,
+                    Ok(true) => TickResult::HitBreakpoint,
+                    Err(hardware::Error::Exit) => TickResult::Exit,
+                    Err(error) => TickResult::Error(error),
+                };
             }
 
             let now = Instant::now();

@@ -156,12 +156,14 @@ pub fn apply_style(mut contexts: EguiContexts, mut clear_color: ResMut<ClearColo
     fonts
         .families
         .insert(egui::FontFamily::Monospace, fallback_order);
-    fonts
-        .families
-        .insert(egui::FontFamily::Name("Pixel Code Raised".into()), vec!["Pixel Code Raised".to_owned()]);
-    fonts
-        .families
-        .insert(egui::FontFamily::Name("Pixel Code SlightlyRaised".into()), vec!["Pixel Code SlightlyRaised".to_owned()]);
+    fonts.families.insert(
+        egui::FontFamily::Name("Pixel Code Raised".into()),
+        vec!["Pixel Code Raised".to_owned()],
+    );
+    fonts.families.insert(
+        egui::FontFamily::Name("Pixel Code SlightlyRaised".into()),
+        vec!["Pixel Code SlightlyRaised".to_owned()],
+    );
     contexts.ctx_mut().set_fonts(fonts);
 
     clear_color.0 = egui_to_bevy_color(BACKGROUND_DARK);

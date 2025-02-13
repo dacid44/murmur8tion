@@ -89,6 +89,7 @@ impl Model for Box<dyn Model> {
 
 macro_rules! dynamic_model_method {
     ($name:ident(self: $($selfty:ty)?$(, $param:ident: $ptype:ty)*)$( -> $ret:ty)?) => {
+        #[inline(always)]
         fn $name(self$(: $selfty)?$(, $param: $ptype)*)$( -> $ret)? {
             match self {
                 Self::CosmacVip(model) => Model::$name(model$(, $param)*),
@@ -126,13 +127,9 @@ impl Display for DynamicModel {
 }
 
 impl Model for DynamicModel {
-    #[inline(always)]
     dynamic_model_method!(memory_size(self: &Self) -> usize);
-    #[inline(always)]
     dynamic_model_method!(instruction_set(self: &Self) -> InstructionSet);
-    #[inline(always)]
     dynamic_model_method!(quirks(self: &Self) -> &Quirks);
-    #[inline(always)]
     dynamic_model_method!(default_framerate(self: &Self) -> f64);
 }
 
